@@ -1,0 +1,13 @@
+# Normalise line endings so a Windows checkout and a Linux CI runner produce
+# identical diffs. Without this, every file a Windows developer touches shows
+# up as entirely rewritten.
+* text=auto eol=lf
+
+# Binary files must never be normalised.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary

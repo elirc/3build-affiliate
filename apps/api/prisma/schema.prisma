@@ -1,0 +1,369 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ============ USERS ============
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  firstName     String
+  lastName      String
+  role          UserRole
+  avatarUrl     String?
+  tokenVersion  Int      @default(0)
+  emailVerified Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Brand-specific
+  companyName String?
+  companyUrl  String?
+  companyLogo String?
+
+  // Affiliate-specific
+  bio                    String?
+  socialLinks            Json?
+  stripeConnectAccountId String?
+
+  // Relations
+  brandCampaigns     Campaign[]
+  affiliateLinks     TrackingLink[]
+  affiliateRelations BrandAffiliate[] @relation("AffiliateRelations")
+  brandRelations     BrandAffiliate[] @relation("BrandRelations")
+  commissions        Commission[]
+  payouts            Payout[]
+  conversions        Conversion[]
+  fraudReviews       FraudReview[]    @relation("Reviewer")
+
+  @@index([email])
+  @@index([role])
+}
+
+enum UserRole {
+  BRAND
+  AFFILIATE
+  ADMIN
+}
+
+// ============ BRAND-AFFILIATE RELATIONSHIP ============
+
+model BrandAffiliate {
+  id            String             @id @default(cuid())
+  brandId       String
+  brand         User               @relation("BrandRelations", fields: [brandId], references: [id])
+  affiliateId   String
+  affiliate     User               @relation("AffiliateRelations", fields: [affiliateId], references: [id])
+  status        RelationshipStatus @default(PENDING)
+  applicationMessage String?
+
+  // Override: brand can set custom commission for this affiliate
+  customCommission Json?
+
+  appliedAt     DateTime  @default(now())
+  approvedAt    DateTime?
+  rejectedAt    DateTime?
+  deactivatedAt DateTime?
+
+  @@unique([brandId, affiliateId])
+  @@index([brandId, status])
+  @@index([affiliateId, status])
+}
+
+enum RelationshipStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  DEACTIVATED
+}
+
+// ============ CAMPAIGNS ============
+
+model Campaign {
+  id             String         @id @default(cuid())
+  brandId        String
+  brand          User           @relation(fields: [brandId], references: [id])
+  name           String
+  description    String?
+  slug           String         @unique
+  landingPageUrl String
+  allowedDomains String[]
+  status         CampaignStatus @default(DRAFT)
+
+  commissionStructure Json
+
+  attributionModel      AttributionModel @default(LAST_CLICK)
+  attributionWindowDays Int              @default(30)
+  cookieLifetimeDays    Int              @default(30)
+  lockPeriodDays        Int              @default(30)
+
+  isOpen Boolean @default(true)
+
+  startDate DateTime
+  endDate   DateTime?
+
+  trackingLinks  TrackingLink[]
+  conversions    Conversion[]
+  commissions    Commission[]
+  creativeAssets CreativeAsset[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([brandId])
+  @@index([status])
+  @@index([slug])
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+enum AttributionModel {
+  FIRST_CLICK
+  LAST_CLICK
+  LINEAR
+}
+
+// ============ TRACKING LINKS ============
+
+model TrackingLink {
+  id             String   @id @default(cuid())
+  affiliateId    String
+  affiliate      User     @relation(fields: [affiliateId], references: [id])
+  campaignId     String
+  campaign       Campaign @relation(fields: [campaignId], references: [id])
+
+  shortCode      String   @unique
+  destinationUrl String
+  customAlias    String?
+  isActive       Boolean  @default(true)
+
+  // Denormalized counters (updated by workers, not real-time)
+  clickCount      Int     @default(0)
+  conversionCount Int     @default(0)
+  revenue         Decimal @db.Decimal(12, 2) @default(0)
+
+  clickEvents ClickEvent[]
+  conversions Conversion[]
+
+  createdAt DateTime @default(now())
+
+  @@index([affiliateId])
+  @@index([campaignId])
+  @@index([shortCode])
+}
+
+// ============ CLICK EVENTS ============
+
+model ClickEvent {
+  id                  String       @id @default(cuid())
+  trackingLinkId      String
+  trackingLink        TrackingLink @relation(fields: [trackingLinkId], references: [id])
+  timestamp           DateTime
+  ipHash              String
+  userAgent           String
+  referrer            String?
+  country             String?
+  region              String?
+  deviceType          String?
+  browser             String?
+  os                  String?
+  attributionCookieId String
+  subIds              Json?
+
+  conversions Conversion[]
+
+  @@index([trackingLinkId])
+  @@index([attributionCookieId])
+  @@index([timestamp])
+  @@index([ipHash])
+}
+
+// ============ CONVERSIONS ============
+
+model Conversion {
+  id               String           @id @default(cuid())
+  trackingLinkId   String
+  trackingLink     TrackingLink     @relation(fields: [trackingLinkId], references: [id])
+  campaignId       String
+  campaign         Campaign         @relation(fields: [campaignId], references: [id])
+  affiliateId      String
+  affiliate        User             @relation(fields: [affiliateId], references: [id])
+  clickEventId     String?
+  clickEvent       ClickEvent?      @relation(fields: [clickEventId], references: [id])
+
+  externalOrderId  String
+  conversionValue  Decimal          @db.Decimal(12, 2)
+  commissionAmount Decimal          @db.Decimal(10, 2)
+  status           ConversionStatus @default(PENDING)
+
+  customerEmailHash   String?
+  isFirstTimeCustomer Boolean @default(true)
+
+  notes            String?
+  approvedAt       DateTime?
+  rejectedAt       DateTime?
+  rejectionReason  String?
+
+  occurredAt       DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  commissions      Commission[]
+  fraudReviews     FraudReview[]
+
+  @@unique([campaignId, externalOrderId])
+  @@index([affiliateId, status])
+  @@index([campaignId, status])
+  @@index([trackingLinkId])
+  @@index([occurredAt])
+}
+
+enum ConversionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// ============ COMMISSIONS ============
+
+model Commission {
+  id            String           @id @default(cuid())
+  affiliateId   String
+  affiliate     User             @relation(fields: [affiliateId], references: [id])
+  campaignId    String
+  campaign      Campaign         @relation(fields: [campaignId], references: [id])
+  conversionId  String
+  conversion    Conversion       @relation(fields: [conversionId], references: [id])
+
+  amount        Decimal          @db.Decimal(10, 2)
+  status        CommissionStatus @default(PENDING)
+
+  lockExpiresAt DateTime?
+  approvedAt    DateTime?
+  paidAt        DateTime?
+
+  payoutId      String?
+  payout        Payout?          @relation(fields: [payoutId], references: [id])
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([affiliateId, status])
+  @@index([payoutId])
+  @@index([lockExpiresAt])
+}
+
+enum CommissionStatus {
+  PENDING
+  LOCKED
+  APPROVED
+  INCLUDED_IN_PAYOUT
+  PAID
+  REJECTED
+  CLAWED_BACK
+}
+
+// ============ PAYOUTS ============
+
+model Payout {
+  id          String        @id @default(cuid())
+  affiliateId String
+  affiliate   User          @relation(fields: [affiliateId], references: [id])
+
+  amount      Decimal       @db.Decimal(10, 2)
+  feeAmount   Decimal       @db.Decimal(10, 2) @default(0)
+  netAmount   Decimal       @db.Decimal(10, 2)
+  currency    String        @default("USD")
+
+  method      PayoutMethod
+  status      PayoutStatus  @default(PENDING)
+
+  stripeTransferId String?
+  failureReason    String?
+
+  periodStart DateTime
+  periodEnd   DateTime
+  paidAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  commissions Commission[]
+
+  @@index([affiliateId, status])
+  @@index([status])
+}
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  PAID
+  FAILED
+  CANCELLED
+}
+
+enum PayoutMethod {
+  STRIPE_CONNECT
+  PAYPAL
+  MANUAL
+}
+
+// ============ CREATIVE ASSETS ============
+
+model CreativeAsset {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
+  name       String
+  type       AssetType
+  url        String
+  width      Int?
+  height     Int?
+  sizeBytes  Int?
+  createdAt  DateTime @default(now())
+
+  @@index([campaignId])
+}
+
+enum AssetType {
+  BANNER
+  LOGO
+  VIDEO
+  TEXT_SWIPE
+  OTHER
+}
+
+// ============ FRAUD REVIEW ============
+
+model FraudReview {
+  id            String       @id @default(cuid())
+  conversionId  String
+  conversion    Conversion   @relation(fields: [conversionId], references: [id])
+  reviewerId    String?
+  reviewer      User?        @relation("Reviewer", fields: [reviewerId], references: [id])
+  riskScore     Int
+  signals       Json
+  decision      FraudDecision @default(PENDING)
+  notes         String?
+  createdAt     DateTime     @default(now())
+  decidedAt     DateTime?
+
+  @@index([conversionId])
+  @@index([decision])
+}
+
+enum FraudDecision {
+  PENDING
+  CLEARED
+  FLAGGED
+  BLOCKED
+}

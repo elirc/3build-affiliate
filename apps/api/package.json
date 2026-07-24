@@ -1,0 +1,44 @@
+{
+  "name": "@affiliate/api",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'no lint configured'",
+    "test": "vitest run",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio",
+    "db:seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@affiliate/shared": "*",
+    "@affiliate/analytics": "*",
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/cors": "^11.2.0",
+    "@fastify/helmet": "^13.0.2",
+    "@fastify/jwt": "^10.1.0",
+    "@fastify/rate-limit": "^10.3.0",
+    "@prisma/client": "^5.14.0",
+    "argon2": "^0.40.1",
+    "bullmq": "^5.7.0",
+    "fastify": "^5.8.5",
+    "ioredis": "^5.4.1",
+    "pino": "^9.0.0",
+    "ua-parser-js": "^1.0.37",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/ua-parser-js": "^0.7.39",
+    "pino-pretty": "^11.2.2",
+    "prisma": "^5.14.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  }
+}

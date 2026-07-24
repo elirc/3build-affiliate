@@ -1,0 +1,21 @@
+{
+  "name": "@affiliate/analytics",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'no lint configured'",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@affiliate/shared": "*",
+    "date-fns": "^3.6.0"
+  },
+  "devDependencies": {
+    "vitest": "^1.6.0",
+    "typescript": "^5.4.0"
+  }
+}

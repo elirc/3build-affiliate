@@ -1,0 +1,12 @@
+export const DEFAULT_ATTRIBUTION_WINDOW_DAYS = 30;
+export const DEFAULT_COOKIE_LIFETIME_DAYS = 30;
+export const DEFAULT_LOCK_PERIOD_DAYS = 30;
+export const MINIMUM_PAYOUT_AMOUNT = 50;
+export const PLATFORM_FEE_PERCENT = 5;
+
+export const MAX_TRACKING_LINKS_PER_AFFILIATE_PER_CAMPAIGN = 25;
+export const MAX_COMMISSION_TIERS = 10;
+export const MAX_FLAT_COMMISSION_USD = 10000;
+
+export const SHORT_CODE_LENGTH = 7;
+export const SHORT_CODE_ALPHABET = 'abcdefghijkmnpqrstuvwxyz23456789';

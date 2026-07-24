@@ -1,0 +1,214 @@
+import { calculateCommission, attribute } from '@affiliate/analytics';
+import { Errors } from '../lib/errors';
+import { hashEmail } from '../lib/hash';
+import type { CommissionStructure, ReportConversionInput, ReviewConversionInput } from '@affiliate/shared';
+import { conversionRepository } from '../repositories/conversion.repository';
+import { campaignRepository } from '../repositories/campaign.repository';
+import { fraudService } from './fraud.service';
+import { prisma } from '../config/prisma';
+
+export function conversionService() {
+  const conversions = conversionRepository(prisma);
+  const campaigns = campaignRepository(prisma);
+  const fraud = fraudService();
+
+  return {
+    /**
+     * Brand reports a conversion (server-to-server, called from their store
+     * after a purchase). We look up the attribution cookie's recent clicks,
+     * apply the attribution model, and create one Commission per share.
+     */
+    async report(campaignId: string, input: ReportConversionInput) {
+      const campaign = await campaigns.findById(campaignId);
+      if (!campaign) throw Errors.notFound('Campaign');
+
+      const duplicate = await prisma.conversion.findFirst({
+        where: {
+          campaignId,
+          OR: [
+            { externalOrderId: input.externalOrderId },
+            { externalOrderId: { startsWith: `${input.externalOrderId}:` } },
+          ],
+        },
+      });
+      if (duplicate) throw Errors.conflict('Conversion with this order id already exists');
+
+      const occurredAt = input.occurredAt ? new Date(input.occurredAt) : new Date();
+      const windowMs = campaign.attributionWindowDays * 86400 * 1000;
+      const windowStart = new Date(occurredAt.getTime() - windowMs);
+
+      const clicks = input.attributionCookieId
+        ? await prisma.clickEvent.findMany({
+            where: {
+              attributionCookieId: input.attributionCookieId,
+              timestamp: { gte: windowStart, lte: occurredAt },
+              trackingLink: { campaignId },
+            },
+            select: {
+              id: true,
+              trackingLinkId: true,
+              timestamp: true,
+              trackingLink: { select: { affiliateId: true } },
+            },
+            orderBy: { timestamp: 'asc' },
+          })
+        : [];
+
+      if (clicks.length === 0) {
+        throw Errors.unprocessable(
+          'No attributable clicks found within the attribution window'
+        );
+      }
+
+      const shares = attribute(
+        campaign.attributionModel,
+        clicks.map((c) => ({
+          trackingLinkId: c.trackingLinkId,
+          affiliateId: c.trackingLink.affiliateId,
+          timestamp: c.timestamp.getTime(),
+        }))
+      );
+
+      const created = await prisma.$transaction(async (tx) => {
+        const records: {
+          conversionId: string;
+          commissionId: string;
+          affiliateId: string;
+          trackingLinkId: string;
+        }[] = [];
+
+        for (const share of shares) {
+          const priorCount = await tx.conversion.count({
+            where: { affiliateId: share.affiliateId, campaignId, status: 'APPROVED' },
+          });
+          const splitValue = Number(input.conversionValue) * share.share;
+          const commissionAmount = calculateCommission(
+            campaign.commissionStructure as unknown as CommissionStructure,
+            splitValue,
+            priorCount
+          );
+
+          const conv = await tx.conversion.create({
+            data: {
+              trackingLinkId: share.trackingLinkId,
+              campaignId,
+              affiliateId: share.affiliateId,
+              clickEventId:
+                clicks.find((c) => c.trackingLinkId === share.trackingLinkId)?.id ??
+                null,
+              externalOrderId:
+                input.externalOrderId +
+                (shares.length > 1 ? `:${share.affiliateId}` : ''),
+              conversionValue: splitValue.toFixed(2),
+              commissionAmount: commissionAmount.toFixed(2),
+              status: 'PENDING',
+              customerEmailHash: input.customerEmail
+                ? hashEmail(input.customerEmail)
+                : null,
+              isFirstTimeCustomer: input.isFirstTimeCustomer,
+              occurredAt,
+            },
+          });
+
+          const lockExpiresAt = new Date(
+            occurredAt.getTime() + campaign.lockPeriodDays * 86400 * 1000
+          );
+          const com = await tx.commission.create({
+            data: {
+              affiliateId: share.affiliateId,
+              campaignId,
+              conversionId: conv.id,
+              amount: commissionAmount.toFixed(2),
+              status: 'LOCKED',
+              lockExpiresAt,
+            },
+          });
+
+          await tx.trackingLink.update({
+            where: { id: share.trackingLinkId },
+            data: {
+              conversionCount: { increment: 1 },
+              revenue: { increment: splitValue },
+            },
+          });
+
+          records.push({
+            conversionId: conv.id,
+            commissionId: com.id,
+            affiliateId: share.affiliateId,
+            trackingLinkId: share.trackingLinkId,
+          });
+        }
+
+        return records;
+      });
+
+      await Promise.all(
+        created.map((record) => {
+          return fraud.evaluate({
+            conversionId: record.conversionId,
+            affiliateId: record.affiliateId,
+            campaignId,
+            attributionCookieId: input.attributionCookieId,
+            clickTimestamps: clicks
+              .filter((c) => c.trackingLinkId === record.trackingLinkId)
+              .map((c) => c.timestamp.getTime()),
+            conversionTimestamp: occurredAt.getTime(),
+          });
+        })
+      );
+
+      return { created };
+    },
+
+    async review(brandId: string, conversionId: string, input: ReviewConversionInput) {
+      const conv = await conversions.findById(conversionId);
+      if (!conv) throw Errors.notFound('Conversion');
+      const campaign = await campaigns.findById(conv.campaignId);
+      if (!campaign || campaign.brandId !== brandId) throw Errors.forbidden();
+      if (conv.status !== 'PENDING') {
+        throw Errors.badRequest('Conversion has already been reviewed');
+      }
+      const status = input.status === 'approved' ? 'APPROVED' : 'REJECTED';
+      return prisma.$transaction(async (tx) => {
+        const updated = await tx.conversion.update({
+          where: { id: conversionId },
+          data:
+            status === 'APPROVED'
+              ? { status, approvedAt: new Date() }
+              : {
+                  status,
+                  rejectedAt: new Date(),
+                  rejectionReason: input.reason,
+                },
+        });
+
+        if (status === 'REJECTED') {
+          await tx.commission.updateMany({
+            where: { conversionId },
+            data: { status: 'REJECTED' },
+          });
+        } else {
+          await tx.commission.updateMany({
+            where: { conversionId, lockExpiresAt: { lte: new Date() } },
+            data: { status: 'APPROVED', approvedAt: new Date() },
+          });
+        }
+
+        return updated;
+      });
+    },
+
+    async listForBrand(
+      brandId: string,
+      opts: { status?: string; page: number; pageSize: number }
+    ) {
+      const skip = (opts.page - 1) * opts.pageSize;
+      return conversions.listForBrandReview(brandId, {
+        status: opts.status,
+        skip,
+        take: opts.pageSize,
+      });
+    },
+  };
+}

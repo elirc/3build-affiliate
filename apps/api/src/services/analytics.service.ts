@@ -1,0 +1,116 @@
+import { buildDailySeries, epc, safeRate } from '@affiliate/analytics';
+import type { DailyMetric } from '@affiliate/shared';
+import { prisma } from '../config/prisma';
+
+type Scope = { brandId: string } | { affiliateId: string };
+
+const DEFAULT_DAYS = 30;
+
+/**
+ * Daily click/conversion/revenue/commission series for a brand or an
+ * affiliate. We pull two grouped queries (clicks via raw SQL because
+ * `groupBy` on a derived date column isn't supported by Prisma's typed
+ * query builder) and fill in zero-days client-side.
+ */
+export function analyticsService() {
+  async function range(scope: Scope, days = DEFAULT_DAYS) {
+    const end = new Date();
+    const start = new Date(end.getTime() - days * 86400 * 1000);
+    return { start, end };
+  }
+
+  async function clicksByDay(scope: Scope, start: Date, end: Date) {
+    if ('brandId' in scope) {
+      return prisma.$queryRaw<{ date: string; count: bigint }[]>`
+        SELECT to_char("timestamp", 'YYYY-MM-DD') as date, COUNT(*)::bigint as count
+        FROM "ClickEvent" ce
+        JOIN "TrackingLink" tl ON tl.id = ce."trackingLinkId"
+        JOIN "Campaign" c ON c.id = tl."campaignId"
+        WHERE c."brandId" = ${scope.brandId}
+          AND ce."timestamp" >= ${start} AND ce."timestamp" <= ${end}
+        GROUP BY 1 ORDER BY 1
+      `;
+    }
+    return prisma.$queryRaw<{ date: string; count: bigint }[]>`
+      SELECT to_char("timestamp", 'YYYY-MM-DD') as date, COUNT(*)::bigint as count
+      FROM "ClickEvent" ce
+      JOIN "TrackingLink" tl ON tl.id = ce."trackingLinkId"
+      WHERE tl."affiliateId" = ${scope.affiliateId}
+        AND ce."timestamp" >= ${start} AND ce."timestamp" <= ${end}
+      GROUP BY 1 ORDER BY 1
+    `;
+  }
+
+  async function conversionsByDay(scope: Scope, start: Date, end: Date) {
+    if ('brandId' in scope) {
+      return prisma.$queryRaw<
+        { date: string; count: bigint; revenue: string; commission: string }[]
+      >`
+        SELECT to_char(co."occurredAt", 'YYYY-MM-DD') as date,
+               COUNT(*)::bigint as count,
+               COALESCE(SUM(co."conversionValue"),0)::text as revenue,
+               COALESCE(SUM(co."commissionAmount"),0)::text as commission
+        FROM "Conversion" co
+        JOIN "Campaign" c ON c.id = co."campaignId"
+        WHERE c."brandId" = ${scope.brandId}
+          AND co."occurredAt" >= ${start} AND co."occurredAt" <= ${end}
+        GROUP BY 1 ORDER BY 1
+      `;
+    }
+    return prisma.$queryRaw<
+      { date: string; count: bigint; revenue: string; commission: string }[]
+    >`
+      SELECT to_char(co."occurredAt", 'YYYY-MM-DD') as date,
+             COUNT(*)::bigint as count,
+             COALESCE(SUM(co."conversionValue"),0)::text as revenue,
+             COALESCE(SUM(co."commissionAmount"),0)::text as commission
+      FROM "Conversion" co
+      WHERE co."affiliateId" = ${scope.affiliateId}
+        AND co."occurredAt" >= ${start} AND co."occurredAt" <= ${end}
+      GROUP BY 1 ORDER BY 1
+    `;
+  }
+
+  async function buildResponse(scope: Scope, days: number) {
+    const { start, end } = await range(scope, days);
+    const [clicks, convs] = await Promise.all([
+      clicksByDay(scope, start, end),
+      conversionsByDay(scope, start, end),
+    ]);
+    const series: DailyMetric[] = buildDailySeries(
+      start,
+      end,
+      clicks.map((r) => ({ date: r.date, count: Number(r.count) })),
+      convs.map((r) => ({
+        date: r.date,
+        count: Number(r.count),
+        revenue: Number(r.revenue),
+        commission: Number(r.commission),
+      }))
+    );
+
+    const totalClicks = series.reduce((s, d) => s + d.clicks, 0);
+    const totalConversions = series.reduce((s, d) => s + d.conversions, 0);
+    const totalRevenue = series.reduce((s, d) => s + Number(d.revenue), 0);
+    const totalCommission = series.reduce((s, d) => s + Number(d.commission), 0);
+
+    return {
+      series,
+      totals: {
+        clicks: totalClicks,
+        conversions: totalConversions,
+        revenue: totalRevenue.toFixed(2),
+        commission: totalCommission.toFixed(2),
+        conversionRate: safeRate(totalConversions, totalClicks),
+        epc: epc(totalCommission, totalClicks),
+      },
+    };
+  }
+
+  return {
+    forBrand: (brandId: string, days = DEFAULT_DAYS) =>
+      buildResponse({ brandId }, days),
+    forAffiliate: (affiliateId: string, days = DEFAULT_DAYS) =>
+      buildResponse({ affiliateId }, days),
+  };
+}

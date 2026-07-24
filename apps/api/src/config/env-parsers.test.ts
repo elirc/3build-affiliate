@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { boolFromString } from './env';
+import { boolFromString } from './env-parsers';
 
 describe('boolFromString', () => {
   const schema = z.object({ flag: boolFromString(false) });

@@ -13,7 +13,7 @@ services:
     # container port is unchanged, so DATABASE_URL is the only thing that has
     # to know about this.
     ports:
-      - '5442:5432'
+      - '5452:5432'
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:

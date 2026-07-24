@@ -164,7 +164,7 @@ between leaves the system inconsistent with no record that anything was owed.
 ```bash
 cp .env.example .env      # set JWT_SECRET and JWT_REFRESH_SECRET (20+ chars)
 npm install
-npm run db:up             # Postgres on 5442, Redis on 6389
+npm run db:up             # Postgres on 5452, Redis on 6389
 npm run db:migrate
 npm run db:seed --workspace=apps/api
 npm run dev

@@ -8,8 +8,12 @@ services:
       POSTGRES_USER: affiliate_user
       POSTGRES_PASSWORD: affiliate_pass
       POSTGRES_DB: affiliate_dev
+    # Host port is deliberately not 5432. Developers here run several projects
+    # at once and the default is usually already bound by another stack. The
+    # container port is unchanged, so DATABASE_URL is the only thing that has
+    # to know about this.
     ports:
-      - '5432:5432'
+      - '5442:5432'
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,7 +26,7 @@ services:
     image: redis:7-alpine
     container_name: affiliate-redis
     ports:
-      - '6379:6379'
+      - '6389:6379'
     command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru --appendonly yes
     volumes:
       - redis_data:/data

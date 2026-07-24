@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to the same PR cancels the previous run. Without this, a branch
+# with five quick pushes queues five full runs and the useful one waits behind
+# four obsolete ones.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: affiliate_user
+          POSTGRES_PASSWORD: affiliate_pass
+          POSTGRES_DB: affiliate_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U affiliate_user -d affiliate_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      # CI talks to the service containers on their default ports. Local dev
+      # uses non-default ports to avoid colliding with other projects; that
+      # difference lives entirely in .env, which is why it is not committed.
+      DATABASE_URL: postgresql://affiliate_user:affiliate_pass@localhost:5432/affiliate_test
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci-jwt-secret-value-long-enough
+      JWT_REFRESH_SECRET: ci-refresh-secret-value-long-enough
+      IP_SALT: ci-ip-salt
+      INTERNAL_API_TOKEN: ci-internal-token
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `npm ci` installs exactly what package-lock.json pins and fails if the
+      # lockfile is out of sync with package.json. `npm install` would quietly
+      # resolve a different tree, which is how "works on my machine" starts.
+      - name: Install
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate --workspace=apps/api
+
+      - name: Apply migrations
+        run: npm run db:deploy --workspace=apps/api
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Build
+        run: npm run build

@@ -48,7 +48,10 @@ jobs:
       JWT_SECRET: ci-jwt-secret-value-long-enough
       JWT_REFRESH_SECRET: ci-refresh-secret-value-long-enough
       IP_SALT: ci-ip-salt
-      INTERNAL_API_TOKEN: ci-internal-token
+      # Both of these are validated for length/shape at boot, so CI needs
+      # values that actually satisfy the schema rather than placeholders.
+      INTERNAL_API_TOKEN: ci-internal-token-long-enough-for-the-schema
+      POSTBACK_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
       NODE_ENV: test
 
     steps:

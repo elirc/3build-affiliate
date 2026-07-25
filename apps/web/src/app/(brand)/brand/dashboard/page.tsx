@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { DashboardShell } from '@/components/DashboardShell';
 import { BRAND_NAV } from '@/components/nav';
 import { AnalyticsChart } from '@/components/AnalyticsChart';
+import { BreakdownTable } from '@/components/BreakdownTable';
 import { api } from '@/lib/api';
 
 interface AnalyticsResponse {
@@ -59,6 +60,19 @@ export default function BrandDashboard() {
       <div className="mt-4">
         {data && <AnalyticsChart series={data.series} metric={metric} />}
       </div>
+
+      <BreakdownTable
+        title="By campaign"
+        endpoint="/api/brand/analytics/campaigns"
+        queryKey="brand-breakdown-campaigns"
+        linkTo={(r) => (r.campaignId ? `/brand/campaigns/${r.campaignId}` : null)}
+      />
+
+      <BreakdownTable
+        title="By affiliate"
+        endpoint="/api/brand/analytics/affiliates"
+        queryKey="brand-breakdown-affiliates"
+      />
     </DashboardShell>
   );
 }

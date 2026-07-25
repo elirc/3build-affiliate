@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { DashboardShell } from '@/components/DashboardShell';
 import { AFFILIATE_NAV } from '@/components/nav';
 import { AnalyticsChart } from '@/components/AnalyticsChart';
+import { BreakdownTable } from '@/components/BreakdownTable';
 import { api } from '@/lib/api';
 
 interface Summary {
@@ -70,6 +71,18 @@ export default function AffiliateDashboard() {
       <div className="mt-4">
         {analytics && <AnalyticsChart series={analytics.series} metric={metric} />}
       </div>
+
+      <BreakdownTable
+        title="By campaign"
+        endpoint="/api/affiliate/analytics/campaigns"
+        queryKey="affiliate-breakdown-campaigns"
+      />
+
+      <BreakdownTable
+        title="By tracking link"
+        endpoint="/api/affiliate/analytics/links"
+        queryKey="affiliate-breakdown-links"
+      />
     </DashboardShell>
   );
 }

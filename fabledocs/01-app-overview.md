@@ -342,7 +342,7 @@ These are *not built*, rather than broken. Each maps to a user story in
 
 | # | Gap | Consequence | Story |
 | --- | --- | --- | --- |
-| 1 | Campaigns are created as `DRAFT` and **no UI can activate them** | A brand can create a campaign and then hit a dead end: it never appears on `/programs`, affiliates can't apply, links can't be created | US-01 |
+| 1 | ~~Campaigns are created as `DRAFT` and **no UI can activate them**~~ **FIXED** | Was: a brand could create a campaign and hit a dead end. The detail page now offers only the legal transitions, and the rules live in `packages/analytics/src/campaign-lifecycle.ts` | US-01 ✅ |
 | 2 | The affiliate "Tracking Links" page is read-only | `POST /api/affiliate/links` and `PATCH /api/affiliate/links/:id` exist but nothing in the UI calls them | US-02 |
 | 3 | ~~Redis link cache has a **1-hour TTL and no rehydration**~~ **FIXED** | Was: one hour after a link was created, every click 302'd to `DEFAULT_FALLBACK_URL` and earned nothing. The redirect service now resolves misses via `GET /internal/links/:shortCode` and repopulates the cache — see `apps/redirect/src/link-resolver.ts` | US-03 ✅ |
 | 4 | No route protection, no token refresh in the web app | Any URL renders for a logged-out user (with failing queries); after 15 minutes a logged-in user silently starts getting 401s. `POST /api/auth/refresh` exists but nothing calls it | US-04 |

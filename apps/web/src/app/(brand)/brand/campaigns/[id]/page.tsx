@@ -4,7 +4,9 @@ import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import { DashboardShell } from '@/components/DashboardShell';
 import { ApiKeyPanel } from '@/components/ApiKeyPanel';
+import { CampaignStatusControls } from '@/components/CampaignStatusControls';
 import { api } from '@/lib/api';
+import type { Campaign } from '@affiliate/shared';
 
 const NAV = [
   { href: '/brand/dashboard', label: 'Overview' },
@@ -17,13 +19,13 @@ export default function CampaignDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data, isLoading } = useQuery({
     queryKey: ['campaign', id],
-    queryFn: () => api<any>(`/api/brand/campaigns/${id}`),
+    queryFn: () => api<Campaign>(`/api/brand/campaigns/${id}`),
   });
 
   if (isLoading) return <DashboardShell title="Brand" nav={NAV}>Loading…</DashboardShell>;
   if (!data) return <DashboardShell title="Brand" nav={NAV}>Not found</DashboardShell>;
 
-  const cs = data.commissionStructure as any;
+  const cs = data.commissionStructure;
 
   return (
     <DashboardShell title="Brand" nav={NAV}>
@@ -32,8 +34,11 @@ export default function CampaignDetailPage() {
         <h1 className="text-2xl font-semibold">{data.name}</h1>
         <p className="mt-2 text-sm text-gray-600">{data.description}</p>
       </div>
+      <div className="mt-6">
+        <CampaignStatusControls campaignId={id} status={data.status} />
+      </div>
+
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <DetailCard label="Status" value={data.status} />
         <DetailCard label="Slug" value={data.slug} />
         <DetailCard label="Attribution" value={`${data.attributionModel} / ${data.attributionWindowDays}d window`} />
         <DetailCard label="Lock period" value={`${data.lockPeriodDays} days`} />
@@ -47,6 +52,14 @@ export default function CampaignDetailPage() {
               : cs.type === 'recurring'
               ? `${cs.percentage}% × ${cs.recurringMonths} mo`
               : `Tiered (${cs.tiers.length})`
+          }
+        />
+        <DetailCard
+          label="Terms"
+          value={
+            data.status === 'DRAFT'
+              ? 'Editable'
+              : 'Locked — activated campaigns keep the terms affiliates joined on'
           }
         />
         <DetailCard label="Open enrollment" value={data.isOpen ? 'Yes' : 'No'} />

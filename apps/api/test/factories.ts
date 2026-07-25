@@ -43,7 +43,17 @@ export async function makeBrand(overrides: { email?: string; companyName?: strin
   });
 }
 
-export async function makeAffiliate(overrides: { email?: string } = {}) {
+export async function makeAffiliate(
+  overrides: { email?: string; payoutDetails?: boolean } = {}
+) {
+  // Payout details are set by default because a payable affiliate is the
+  // ordinary case, and `requestPayout` refuses a method with none on file.
+  // Without this, every test that happens to request a payout would have to
+  // configure settings first, which buries what the test is actually about.
+  //
+  // Pass `payoutDetails: false` to build the unpayable case deliberately.
+  const payable = overrides.payoutDetails ?? true;
+
   return prisma.user.create({
     data: {
       email: overrides.email ?? `affiliate-${uniq()}@example.com`,
@@ -52,6 +62,12 @@ export async function makeAffiliate(overrides: { email?: string } = {}) {
       lastName: 'Liat',
       role: 'AFFILIATE',
       emailVerified: true,
+      ...(payable
+        ? {
+            payoutMethod: 'MANUAL' as const,
+            manualPayoutDetails: 'Test bank reference',
+          }
+        : {}),
     },
   });
 }

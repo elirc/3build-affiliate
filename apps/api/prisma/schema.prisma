@@ -30,7 +30,14 @@ model User {
   // Affiliate-specific
   bio                    String?
   socialLinks            Json?
+
+  // Payout details. Which of these is required depends on payoutMethod, which
+  // is enforced by a discriminated union at the boundary rather than by the
+  // database -- a nullable column cannot express "required when method is X".
+  payoutMethod           PayoutMethod?
   stripeConnectAccountId String?
+  paypalEmail            String?
+  manualPayoutDetails    String?
 
   // Relations
   brandCampaigns     Campaign[]

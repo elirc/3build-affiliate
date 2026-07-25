@@ -12,6 +12,7 @@ import { MINIMUM_PAYOUT_AMOUNT } from '@affiliate/shared';
 import type { Payout } from '@prisma/client';
 import { commissionRepository } from '../repositories/commission.repository';
 import { payoutRepository } from '../repositories/payout.repository';
+import { profileService } from './profile.service';
 import { prisma } from '../config/prisma';
 import { env } from '../config/env';
 
@@ -33,6 +34,7 @@ function toPayoutResponse(payout: Payout) {
 export function payoutService() {
   const commissions = commissionRepository(prisma);
   const payouts = payoutRepository(prisma);
+  const profiles = profileService();
 
   return {
     /**
@@ -54,6 +56,11 @@ export function payoutService() {
       method: 'stripe_connect' | 'paypal' | 'manual',
       opts: { idempotencyKey?: string } = {}
     ) {
+      // Checked before anything is claimed. Discovering there is no PayPal
+      // address at the point of transfer wastes an admin's time and delays the
+      // affiliate by a payout cycle.
+      await profiles.assertCanReceive(affiliateId, method);
+
       if (opts.idempotencyKey) {
         const existing = await payouts.findByIdempotencyKey(
           affiliateId,

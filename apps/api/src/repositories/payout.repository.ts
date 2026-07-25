@@ -49,6 +49,9 @@ export function payoutRepository(db: DB) {
         },
       }),
 
+    findByIdempotencyKey: (affiliateId: string, idempotencyKey: string) =>
+      db.payout.findFirst({ where: { affiliateId, idempotencyKey } }),
+
     hasOpenPayout: (affiliateId: string) =>
       db.payout.findFirst({
         where: { affiliateId, status: { in: ['PENDING', 'PROCESSING'] } },

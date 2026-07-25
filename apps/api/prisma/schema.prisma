@@ -322,6 +322,11 @@ model Payout {
   stripeTransferId String?
   failureReason    String?
 
+  /// Client-supplied key for safe retries. Unique per affiliate rather than
+  /// globally: two affiliates independently sending "retry-1" is ordinary,
+  /// and a global constraint would make the second one fail.
+  idempotencyKey   String?
+
   periodStart DateTime
   periodEnd   DateTime
   paidAt      DateTime?
@@ -330,6 +335,7 @@ model Payout {
   commissions Commission[]
   events      PayoutEvent[]
 
+  @@unique([affiliateId, idempotencyKey])
   @@index([affiliateId, status])
   @@index([status])
 }

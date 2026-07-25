@@ -143,12 +143,16 @@ describe('payout lifecycle', () => {
       toStatus: string;
       actorId: string;
     }>;
+    // The first entry is the affiliate requesting it. PENDING->PENDING looks
+    // odd but is deliberate: the history should say who asked for the money,
+    // not begin at the point an admin first touched it.
     expect(events.map((e) => `${e.fromStatus}->${e.toStatus}`)).toEqual([
+      'PENDING->PENDING',
       'PENDING->PROCESSING',
       'PROCESSING->PAID',
     ]);
-    expect(events.every((e) => e.actorId === admin.id)).toBe(true);
-    expect(affiliate.id).toBeTruthy();
+    expect(events[0]!.actorId).toBe(affiliate.id);
+    expect(events.slice(1).every((e) => e.actorId === admin.id)).toBe(true);
   });
 
   it('returns commissions to the balance when a payout fails', async () => {

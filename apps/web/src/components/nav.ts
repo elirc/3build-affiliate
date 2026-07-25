@@ -35,4 +35,5 @@ export const BRAND_NAV: NavItem[] = [
 export const ADMIN_NAV: NavItem[] = [
   { href: '/admin/fraud', label: 'Fraud Review' },
   { href: '/admin/payouts', label: 'Payouts' },
+  { href: '/admin/system', label: 'System Health' },
 ];

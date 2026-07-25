@@ -357,7 +357,7 @@ These are *not built*, rather than broken. Each maps to a user story in
 | 13 | Sub-IDs are captured and never surfaced | `ClickEvent.subIds` is written by the worker and read by nothing | US-14 |
 | 14 | No CSV export anywhere | Finance teams live in spreadsheets | US-15 |
 | 15 | Dashboards are hardcoded to 30 days | The API already accepts `?days=` up to 90 | US-16 |
-| 16 | `/admin/system` is in the admin nav but the page doesn't exist | 404 for admins | US-17 |
+| 16 | ~~`/admin/system` is in the admin nav but the page doesn't exist~~ **FIXED** | The page exists, and failed click batches now land in a dead-letter queue instead of being lost | US-17 ✅ |
 | 17 | No bot filtering or click dedup at the edge | A refresh-happy shopper or a crawler inflates click counts and craters EPC | US-18 |
 | 18 | Zero notifications | Nobody is told their application was approved or their payout was sent | US-19 |
 | 19 | No integration tests | 4 unit test files cover pure functions only; nothing exercises a route, the DB, or a worker | US-20 |

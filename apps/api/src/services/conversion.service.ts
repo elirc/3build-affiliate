@@ -19,6 +19,7 @@ import { conversionRepository } from '../repositories/conversion.repository';
 import { campaignRepository } from '../repositories/campaign.repository';
 import { fraudService } from './fraud.service';
 import { subscriptionService } from './subscription.service';
+import { enqueueNotification } from './notification.service';
 import { prisma } from '../config/prisma';
 
 /**
@@ -275,6 +276,17 @@ export function conversionService() {
           });
         }
 
+        await enqueueNotification(tx, {
+          userId: conv.affiliateId,
+          type: status === 'APPROVED' ? 'conversion_approved' : 'conversion_rejected',
+          payload: {
+            conversionId,
+            orderId: conv.externalOrderId,
+            commission: String(conv.commissionAmount),
+            reason: input.reason ?? null,
+          },
+        });
+
         return updated;
       });
     },
@@ -385,6 +397,20 @@ export function conversionService() {
           data: {
             revenue: { decrement: Number(refundAmount) },
             ...(outcome.isFullRefund ? { conversionCount: { decrement: 1 } } : {}),
+          },
+        });
+
+        // Mandatory: a reversal takes back money the affiliate was already
+        // told they had earned. A silent deduction destroys trust faster than
+        // the deduction itself.
+        await enqueueNotification(tx, {
+          userId: conv.affiliateId,
+          type: 'commission_clawed_back',
+          payload: {
+            conversionId,
+            orderId: conv.externalOrderId,
+            clawbackAmount: outcome.clawbackAmount,
+            reason: input.reason,
           },
         });
 

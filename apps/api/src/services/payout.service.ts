@@ -14,6 +14,7 @@ import { commissionRepository } from '../repositories/commission.repository';
 import { payoutRepository } from '../repositories/payout.repository';
 import { profileService } from './profile.service';
 import { prisma } from '../config/prisma';
+import { enqueueNotification } from './notification.service';
 import { env } from '../config/env';
 
 /**
@@ -254,6 +255,21 @@ export function payoutService() {
             reference: opts.reference ?? null,
           },
         });
+
+        // Enqueued in the same transaction as the state change. If this
+        // rolls back the notification never existed; if it commits, the
+        // affiliate is guaranteed to be told.
+        if (to === 'PAID' || to === 'FAILED') {
+          await enqueueNotification(tx, {
+            userId: payout.affiliateId,
+            type: to === 'PAID' ? 'payout_paid' : 'payout_failed',
+            payload: {
+              payoutId,
+              amount: money(updated.netAmount),
+              reason: opts.reason ?? null,
+            },
+          });
+        }
 
         return toPayoutResponse(updated);
       });

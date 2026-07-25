@@ -4,6 +4,7 @@ import { Errors } from '../lib/errors';
 import { brandAffiliateRepository } from '../repositories/brand-affiliate.repository';
 import { campaignRepository } from '../repositories/campaign.repository';
 import { prisma } from '../config/prisma';
+import { enqueueNotification } from './notification.service';
 import type { ApplyToCampaignInput, CommissionStructure } from '@affiliate/shared';
 
 /**
@@ -78,7 +79,28 @@ export function relationshipService() {
       if (rel.brandId !== brandId) throw Errors.forbidden();
       const next =
         action === 'approve' ? 'APPROVED' : action === 'reject' ? 'REJECTED' : 'DEACTIVATED';
-      return repo.setStatus(relationshipId, next);
+
+      return prisma.$transaction(async (tx) => {
+        const updated = await tx.brandAffiliate.update({
+          where: { id: relationshipId },
+          data: {
+            status: next,
+            ...(next === 'APPROVED' ? { approvedAt: new Date() } : {}),
+            ...(next === 'REJECTED' ? { rejectedAt: new Date() } : {}),
+            ...(next === 'DEACTIVATED' ? { deactivatedAt: new Date() } : {}),
+          },
+        });
+
+        if (action === 'approve' || action === 'reject') {
+          await enqueueNotification(tx, {
+            userId: rel.affiliateId,
+            type: action === 'approve' ? 'application_approved' : 'application_rejected',
+            payload: { brandId, relationshipId },
+          });
+        }
+
+        return updated;
+      });
     },
 
     /**

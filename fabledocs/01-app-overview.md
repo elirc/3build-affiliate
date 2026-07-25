@@ -359,8 +359,8 @@ These are *not built*, rather than broken. Each maps to a user story in
 | 15 | Dashboards are hardcoded to 30 days | The API already accepts `?days=` up to 90 | US-16 |
 | 16 | ~~`/admin/system` is in the admin nav but the page doesn't exist~~ **FIXED** | The page exists, and failed click batches now land in a dead-letter queue instead of being lost | US-17 ✅ |
 | 17 | No bot filtering or click dedup at the edge | A refresh-happy shopper or a crawler inflates click counts and craters EPC | US-18 |
-| 18 | Zero notifications | Nobody is told their application was approved or their payout was sent | US-19 |
-| 19 | No integration tests | 4 unit test files cover pure functions only; nothing exercises a route, the DB, or a worker | US-20 |
+| 18 | ~~Zero notifications~~ **FIXED** | A transactional outbox: rows are written in the same transaction as the state change, so a notification cannot exist for something that did not happen, nor be lost for something that did | US-19 ✅ |
+| 19 | ~~No integration tests~~ **FIXED** | 120 unit tests plus a full integration harness (`npm run test:integration`) running against real Postgres and Redis | US-20 ✅ |
 | 20 | `emailVerified` is set by the seed and never by a flow; no password reset | — | (not scheduled) |
 
 ### Traps that have already bitten people

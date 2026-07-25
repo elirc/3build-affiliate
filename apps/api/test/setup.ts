@@ -11,6 +11,8 @@ import { redis } from '../src/config/redis';
  * about whether tests should reset it.
  */
 const TABLES = [
+  'NotificationPreference',
+  'Notification',
   'FraudReview',
   'Commission',
   'Subscription',

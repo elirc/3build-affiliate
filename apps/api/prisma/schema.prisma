@@ -51,6 +51,8 @@ model User {
   payoutActions      PayoutEvent[]    @relation("PayoutActor")
   balanceAdjustments BalanceAdjustment[]
   subscriptions      Subscription[]
+  notifications      Notification[]
+  notificationPrefs  NotificationPreference[]
 
   @@index([email])
   @@index([role])
@@ -467,6 +469,54 @@ enum SubscriptionStatus {
   ACTIVE
   CANCELLED
   COMPLETED
+}
+
+/// Transactional outbox for notifications.
+///
+/// Rows are written in the *same transaction* as the state change that caused
+/// them. If the transaction rolls back, the notification never existed; if it
+/// commits, the notification is guaranteed to exist and a worker will deliver
+/// it. Sending after the commit instead would mean a crash in between loses
+/// the message with no record that anything was owed -- which is exactly the
+/// hole fraud.evaluate still has.
+model Notification {
+  id        String             @id @default(cuid())
+  userId    String
+  user      User               @relation(fields: [userId], references: [id])
+
+  type      String
+  payload   Json
+
+  readAt    DateTime?
+  sentAt    DateTime?
+  attempts  Int                @default(0)
+  lastError String?
+  status    NotificationStatus @default(PENDING)
+
+  createdAt DateTime           @default(now())
+
+  @@index([userId, readAt])
+  @@index([status, createdAt])
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+/// Per-user opt-outs.
+///
+/// Absence means opted in: a user who has never touched their preferences
+/// should still hear that they have been paid.
+model NotificationPreference {
+  id      String  @id @default(cuid())
+  userId  String
+  user    User    @relation(fields: [userId], references: [id])
+  type    String
+  enabled Boolean @default(true)
+
+  @@unique([userId, type])
 }
 
 // ============ BALANCE ADJUSTMENTS ============

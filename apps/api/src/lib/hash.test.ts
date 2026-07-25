@@ -12,14 +12,31 @@ describe('hashEmail', () => {
 });
 
 describe('password hashing', () => {
-  it('verifies matching passwords and rejects mismatches', async () => {
-    const hash = await hashPassword('CorrectHorseBatteryStaple');
+  // argon2id is deliberately expensive -- that is the entire point of it.
+  // At the default cost this is one hash plus two verifies, which exceeds
+  // vitest's 5s default on a contended machine or a shared CI runner. Raising
+  // the timeout is correct here; lowering the argon2 cost to make the test
+  // fast would weaken the thing being tested.
+  const ARGON2_TIMEOUT_MS = 30_000;
 
-    await expect(verifyPassword(hash, 'CorrectHorseBatteryStaple')).resolves.toBe(true);
-    await expect(verifyPassword(hash, 'wrong-password')).resolves.toBe(false);
-  });
+  it(
+    'verifies matching passwords and rejects mismatches',
+    async () => {
+      const hash = await hashPassword('CorrectHorseBatteryStaple');
 
-  it('returns false for malformed hashes', async () => {
-    await expect(verifyPassword('not-a-real-hash', 'password')).resolves.toBe(false);
-  });
+      await expect(verifyPassword(hash, 'CorrectHorseBatteryStaple')).resolves.toBe(
+        true
+      );
+      await expect(verifyPassword(hash, 'wrong-password')).resolves.toBe(false);
+    },
+    ARGON2_TIMEOUT_MS
+  );
+
+  it(
+    'returns false for malformed hashes',
+    async () => {
+      await expect(verifyPassword('not-a-real-hash', 'password')).resolves.toBe(false);
+    },
+    ARGON2_TIMEOUT_MS
+  );
 });

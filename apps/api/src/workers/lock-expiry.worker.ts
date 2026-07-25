@@ -1,6 +1,8 @@
 import { prisma } from '../config/prisma';
 import { logger } from '../lib/logger';
+import { beat } from '../lib/heartbeat';
 
+export const WORKER_NAME = 'lock-expiry';
 const TICK_MS = 60_000;
 const BATCH = 200;
 
@@ -64,8 +66,10 @@ export async function startLockExpiryWorker() {
       if (promoted > 0) {
         logger.info({ count: promoted }, 'Commissions promoted LOCKED → APPROVED');
       }
+      await beat(WORKER_NAME, TICK_MS, { lastPromoted: promoted });
     } catch (err) {
       logger.error({ err }, 'Lock-expiry tick failed');
+      await beat(WORKER_NAME, TICK_MS, { lastError: String(err) });
     }
   };
 

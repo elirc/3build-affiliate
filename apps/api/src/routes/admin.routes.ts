@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { prisma } from '../config/prisma';
 import { requireAuth, requireRole, type AuthedRequest } from '../lib/auth';
 import { Errors } from '../lib/errors';
+import { systemService } from '../services/system.service';
+import { replayDeadLetters } from '../workers/click-event.worker';
 
 const decisionSchema = z.object({
   decision: z.enum(['CLEARED', 'FLAGGED', 'BLOCKED']),
@@ -10,6 +12,31 @@ const decisionSchema = z.object({
 });
 
 export async function adminRoutes(app: FastifyInstance) {
+  const system = systemService();
+
+  app.get(
+    '/admin/system',
+    { preHandler: [requireAuth, requireRole('ADMIN')] },
+    async () => system.check()
+  );
+
+  /**
+   * Replays failed click events.
+   *
+   * Manual on purpose. A batch usually fails for a reason that is still true
+   * a second later, and an automatic retry turns one outage into a spin. An
+   * operator decides when the cause is fixed.
+   */
+  app.post(
+    '/admin/system/replay-dlq',
+    { preHandler: [requireAuth, requireRole('ADMIN')] },
+    async () => {
+      const result = await replayDeadLetters();
+      system.clearCache();
+      return result;
+    }
+  );
+
   app.get(
     '/admin/fraud-reviews',
     { preHandler: [requireAuth, requireRole('ADMIN')] },

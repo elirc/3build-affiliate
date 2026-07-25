@@ -1,11 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api, tokenStore } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const setUser = useAuth((s) => s.setUser);
@@ -78,5 +78,29 @@ export default function LoginPage() {
         </button>
       </form>
     </main>
+  );
+}
+
+/**
+ * useSearchParams() opts a component into client-side rendering, and Next
+ * refuses to prerender a page that reads it without a Suspense boundary --
+ * during the static pass there are no search params to read, so it has to
+ * know what to render instead.
+ *
+ * This failed only at `next build`: typecheck and tests both passed, because
+ * neither prerenders. Worth remembering that "it compiles and the tests pass"
+ * is not the same as "it builds".
+ */
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="mx-auto max-w-md px-6 py-16">
+          <h1 className="text-2xl font-semibold">Sign in</h1>
+        </main>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }

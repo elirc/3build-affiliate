@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DashboardShell } from '@/components/DashboardShell';
 import { BRAND_NAV } from '@/components/nav';
 import { api } from '@/lib/api';
+import { ExportButton } from '@/components/ExportButton';
 
 interface Conversion {
   id: string;
@@ -66,7 +67,10 @@ export default function BrandConversionsPage() {
     <DashboardShell title="Brand" nav={BRAND_NAV}>
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Conversions</h1>
-        <div className="flex gap-2 text-sm">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <ExportButton
+            endpoint={`/api/brand/conversions/export${status === 'ALL' ? '' : `?status=${status}`}`}
+          />
           {(['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const).map((s) => (
             <button
               key={s}

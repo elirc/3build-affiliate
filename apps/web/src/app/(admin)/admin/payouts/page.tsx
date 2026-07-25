@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DashboardShell } from '@/components/DashboardShell';
 import { ADMIN_NAV } from '@/components/nav';
 import { api } from '@/lib/api';
+import { ExportButton } from '@/components/ExportButton';
 
 type Status = 'PENDING' | 'PROCESSING' | 'PAID' | 'FAILED' | 'CANCELLED';
 
@@ -67,7 +68,10 @@ export default function AdminPayoutsPage() {
 
   return (
     <DashboardShell title="Admin" nav={ADMIN_NAV}>
-      <h1 className="text-2xl font-semibold">Payouts</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Payouts</h1>
+        <ExportButton endpoint="/api/admin/payouts/export" />
+      </div>
       <p className="mt-2 text-gray-600">
         Money leaving the platform. Mark a payout processing when you initiate the
         transfer, and paid once it settles.

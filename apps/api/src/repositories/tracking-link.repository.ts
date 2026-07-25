@@ -23,7 +23,13 @@ export function trackingLinkRepository(db: DB) {
           campaignId: true,
           destinationUrl: true,
           isActive: true,
-          campaign: { select: { cookieLifetimeDays: true } },
+          campaign: {
+            select: {
+              cookieLifetimeDays: true,
+              status: true,
+              landingPageUrl: true,
+            },
+          },
         },
       }),
 

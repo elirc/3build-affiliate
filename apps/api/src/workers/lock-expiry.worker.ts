@@ -17,37 +17,53 @@ const BATCH = 200;
  * If the conversion is still PENDING or REJECTED when the lock window
  * passes, we leave the commission alone; the brand still owes a decision.
  */
+/**
+ * One promotion pass.
+ *
+ * Takes `now` so a test can ask "what would happen 31 days from today?"
+ * without touching the system clock or waiting. Defaults to the real clock in
+ * production, where there is nothing to fake.
+ */
+export async function promoteExpiredLocks(
+  now: Date = new Date()
+): Promise<{ promoted: number }> {
+  const expired = await prisma.commission.findMany({
+    where: { status: 'LOCKED', lockExpiresAt: { lte: now } },
+    take: BATCH,
+    select: { id: true, conversionId: true },
+  });
+  if (expired.length === 0) return { promoted: 0 };
+
+  const conversions = await prisma.conversion.findMany({
+    where: { id: { in: expired.map((e) => e.conversionId) } },
+    select: { id: true, status: true },
+  });
+  const approvedConvIds = new Set(
+    conversions.filter((c) => c.status === 'APPROVED').map((c) => c.id)
+  );
+
+  const toApprove = expired
+    .filter((e) => approvedConvIds.has(e.conversionId))
+    .map((e) => e.id);
+
+  if (toApprove.length === 0) return { promoted: 0 };
+
+  const result = await prisma.commission.updateMany({
+    where: { id: { in: toApprove } },
+    data: { status: 'APPROVED', approvedAt: now },
+  });
+  return { promoted: result.count };
+}
+
 export async function startLockExpiryWorker() {
   logger.info('Lock-expiry worker started');
 
   const tick = async () => {
     try {
-      const expired = await prisma.commission.findMany({
-        where: { status: 'LOCKED', lockExpiresAt: { lte: new Date() } },
-        take: BATCH,
-        select: { id: true, conversionId: true },
-      });
-      if (expired.length === 0) return;
-
-      const conversions = await prisma.conversion.findMany({
-        where: { id: { in: expired.map((e) => e.conversionId) } },
-        select: { id: true, status: true },
-      });
-      const approvedConvIds = new Set(
-        conversions.filter((c) => c.status === 'APPROVED').map((c) => c.id)
-      );
-
-      const toApprove = expired
-        .filter((e) => approvedConvIds.has(e.conversionId))
-        .map((e) => e.id);
-
-      if (toApprove.length === 0) return;
-
-      const result = await prisma.commission.updateMany({
-        where: { id: { in: toApprove } },
-        data: { status: 'APPROVED', approvedAt: new Date() },
-      });
-      logger.info({ count: result.count }, 'Commissions promoted LOCKED → APPROVED');
+      const { promoted } = await promoteExpiredLocks();
+      if (promoted > 0) {
+        logger.info({ count: promoted }, 'Commissions promoted LOCKED → APPROVED');
+      }
     } catch (err) {
       logger.error({ err }, 'Lock-expiry tick failed');
     }

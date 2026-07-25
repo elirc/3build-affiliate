@@ -1,6 +1,6 @@
-import { acceptsNewAffiliates } from '@affiliate/analytics';
+import { acceptsNewAffiliates, formatCommission } from '@affiliate/analytics';
 import { Errors } from '../lib/errors';
-import { generateShortCode, MAX_TRACKING_LINKS_PER_AFFILIATE_PER_CAMPAIGN, type CachedTrackingLink, type CreateTrackingLinkInput } from '@affiliate/shared';
+import { generateShortCode, MAX_TRACKING_LINKS_PER_AFFILIATE_PER_CAMPAIGN, type CachedTrackingLink, type CommissionStructure, type CreateTrackingLinkInput } from '@affiliate/shared';
 import { trackingLinkRepository } from '../repositories/tracking-link.repository';
 import { campaignRepository } from '../repositories/campaign.repository';
 import { relationshipService } from './relationship.service';
@@ -99,6 +99,27 @@ export function trackingService() {
 
     async listMine(affiliateId: string) {
       return links.listByAffiliate(affiliateId);
+    },
+
+    /**
+     * Campaigns this affiliate can create a link on right now.
+     *
+     * Returns the allowed domains and a formatted commission summary so the
+     * form can tell the affiliate what will be accepted *before* they submit,
+     * rather than after a rejected request.
+     */
+    async listEligibleCampaigns(affiliateId: string) {
+      const eligible = await campaigns.listEligibleForAffiliate(affiliateId);
+      return eligible.map((c) => ({
+        id: c.id,
+        name: c.name,
+        brandName: c.brand.companyName,
+        allowedDomains: c.allowedDomains,
+        landingPageUrl: c.landingPageUrl,
+        commissionSummary: formatCommission(
+          c.commissionStructure as unknown as CommissionStructure
+        ),
+      }));
     },
 
     async toggleActive(affiliateId: string, linkId: string, isActive: boolean) {

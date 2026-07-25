@@ -27,6 +27,15 @@ export async function trackingRoutes(app: FastifyInstance) {
     }
   );
 
+  app.get(
+    '/affiliate/eligible-campaigns',
+    { preHandler: [requireAuth, requireRole('AFFILIATE')] },
+    async (req) => {
+      const user = (req as AuthedRequest).user;
+      return svc.listEligibleCampaigns(user.id);
+    }
+  );
+
   app.patch(
     '/affiliate/links/:id',
     { preHandler: [requireAuth, requireRole('AFFILIATE')] },

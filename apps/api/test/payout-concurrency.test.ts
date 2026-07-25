@@ -120,6 +120,15 @@ describe('payout request safety', () => {
       include: { commissions: true },
     });
 
+    // Holds only because these affiliates have no balance adjustments. Once
+    // clawbacks are netted off (US-08) a payout is legitimately smaller than
+    // the sum of its commissions, so the invariant becomes
+    // `amount === sum(commissions) + sum(adjustments)`.
+    const adjustments = await prisma.balanceAdjustment.count({
+      where: { affiliateId: affiliate.id },
+    });
+    expect(adjustments).toBe(0);
+
     for (const p of payouts) {
       const attached = p.commissions.reduce((sum, c) => sum + Number(c.amount), 0);
       expect(Number(p.amount)).toBe(attached);

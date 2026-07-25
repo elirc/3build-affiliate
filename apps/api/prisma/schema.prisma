@@ -43,6 +43,7 @@ model User {
   fraudReviews       FraudReview[]    @relation("Reviewer")
   payoutActions      PayoutEvent[]    @relation("PayoutActor")
   balanceAdjustments BalanceAdjustment[]
+  subscriptions      Subscription[]
 
   @@index([email])
   @@index([role])
@@ -117,6 +118,7 @@ model Campaign {
   commissions    Commission[]
   creativeAssets CreativeAsset[]
   apiKeys        CampaignApiKey[]
+  subscriptions  Subscription[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -188,6 +190,7 @@ model TrackingLink {
 
   clickEvents ClickEvent[]
   conversions Conversion[]
+  subscriptions Subscription[]
 
   createdAt DateTime @default(now())
 
@@ -394,6 +397,50 @@ model CommissionOverrideEvent {
   createdAt      DateTime @default(now())
 
   @@index([brandAffiliateId])
+}
+
+/// A referred customer on a recurring-commission campaign.
+///
+/// Exists because a recurring deal is a promise about the *future*: "30% for
+/// twelve months" cannot be satisfied by the single commission the first sale
+/// produces. The subscription is what remembers how many periods are left and
+/// on what terms.
+model Subscription {
+  id                   String   @id @default(cuid())
+  campaignId           String
+  campaign             Campaign @relation(fields: [campaignId], references: [id])
+  affiliateId          String
+  affiliate            User     @relation(fields: [affiliateId], references: [id])
+  trackingLinkId       String
+  trackingLink         TrackingLink @relation(fields: [trackingLinkId], references: [id])
+
+  originalConversionId String   @unique
+  customerEmailHash    String?
+  externalReference    String
+
+  /// The commission terms as they stood when this subscription started.
+  ///
+  /// Snapshotted rather than read live: a customer who signed up under a 30%
+  /// deal keeps it for their whole term, even if the brand later changes the
+  /// campaign. Reading the campaign each month would let a brand retroactively
+  /// cut a rate they already promised.
+  commissionSnapshot   Json
+
+  totalPeriods         Int
+  completedPeriods     Int      @default(1)
+
+  status               SubscriptionStatus @default(ACTIVE)
+  startedAt            DateTime @default(now())
+  cancelledAt          DateTime?
+
+  @@unique([campaignId, externalReference])
+  @@index([affiliateId, status])
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  COMPLETED
 }
 
 // ============ BALANCE ADJUSTMENTS ============

@@ -17,6 +17,7 @@ import type {
 import { conversionRepository } from '../repositories/conversion.repository';
 import { campaignRepository } from '../repositories/campaign.repository';
 import { fraudService } from './fraud.service';
+import { subscriptionService } from './subscription.service';
 import { prisma } from '../config/prisma';
 
 /**
@@ -32,6 +33,7 @@ export function conversionService() {
   const conversions = conversionRepository(prisma);
   const campaigns = campaignRepository(prisma);
   const fraud = fraudService();
+  const subscriptions = subscriptionService();
 
   return {
     /**
@@ -106,6 +108,7 @@ export function conversionService() {
           commissionId: string;
           affiliateId: string;
           trackingLinkId: string;
+          structure: CommissionStructure;
         }[] = [];
 
         for (const share of shares) {
@@ -187,11 +190,28 @@ export function conversionService() {
             commissionId: com.id,
             affiliateId: share.affiliateId,
             trackingLinkId: share.trackingLinkId,
+            structure,
           });
         }
 
         return records;
       });
+
+      // A recurring campaign promises future periods, so the first sale has to
+      // leave something behind that remembers the terms and the count.
+      await Promise.all(
+        created.map((record) =>
+          subscriptions.startIfRecurring({
+            campaignId,
+            affiliateId: record.affiliateId,
+            trackingLinkId: record.trackingLinkId,
+            conversionId: record.conversionId,
+            externalReference: input.externalOrderId,
+            customerEmailHash: input.customerEmail ? hashEmail(input.customerEmail) : null,
+            structure: record.structure,
+          })
+        )
+      );
 
       await Promise.all(
         created.map((record) => {

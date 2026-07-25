@@ -4,16 +4,10 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { DashboardShell } from '@/components/DashboardShell';
+import { BRAND_NAV } from '@/components/nav';
 import { StatusBadge } from '@/components/CampaignStatusControls';
 import { api } from '@/lib/api';
 import type { CampaignStatus } from '@affiliate/shared';
-
-const NAV = [
-  { href: '/brand/dashboard', label: 'Overview' },
-  { href: '/brand/campaigns', label: 'Campaigns' },
-  { href: '/brand/affiliates', label: 'Affiliates' },
-  { href: '/brand/conversions', label: 'Conversions' },
-];
 
 interface Campaign {
   id: string;
@@ -42,7 +36,7 @@ export default function CampaignsPage() {
   });
 
   return (
-    <DashboardShell title="Brand" nav={NAV}>
+    <DashboardShell title="Brand" nav={BRAND_NAV}>
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Campaigns</h1>
         <Link

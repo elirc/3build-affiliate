@@ -41,6 +41,33 @@ export function campaignRepository(db: DB) {
         },
       }),
 
+    /**
+     * Campaigns this affiliate may build links on right now: ACTIVE, and
+     * belonging to a brand that has already approved them.
+     *
+     * Filtering by the relationship in SQL rather than fetching all active
+     * campaigns and filtering in JS keeps the "are they approved?" rule in one
+     * place, and means the picker cannot show something the API would refuse.
+     */
+    listEligibleForAffiliate: (affiliateId: string) =>
+      db.campaign.findMany({
+        where: {
+          status: 'ACTIVE',
+          brand: {
+            brandRelations: { some: { affiliateId, status: 'APPROVED' } },
+          },
+        },
+        orderBy: { name: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          allowedDomains: true,
+          landingPageUrl: true,
+          commissionStructure: true,
+          brand: { select: { id: true, companyName: true } },
+        },
+      }),
+
     listOpenForAffiliates: (opts: { skip: number; take: number }) =>
       db.campaign.findMany({
         where: { status: 'ACTIVE', isOpen: true },

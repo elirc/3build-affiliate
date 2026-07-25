@@ -3,15 +3,9 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { DashboardShell } from '@/components/DashboardShell';
+import { BRAND_NAV } from '@/components/nav';
 import { api } from '@/lib/api';
 import type { CommissionStructure } from '@affiliate/shared';
-
-const NAV = [
-  { href: '/brand/dashboard', label: 'Overview' },
-  { href: '/brand/campaigns', label: 'Campaigns' },
-  { href: '/brand/affiliates', label: 'Affiliates' },
-  { href: '/brand/conversions', label: 'Conversions' },
-];
 
 type CommissionType = CommissionStructure['type'];
 
@@ -92,7 +86,7 @@ export default function NewCampaignPage() {
   }
 
   return (
-    <DashboardShell title="Brand" nav={NAV}>
+    <DashboardShell title="Brand" nav={BRAND_NAV}>
       <h1 className="text-2xl font-semibold">New Campaign</h1>
       <form onSubmit={onSubmit} className="mt-6 max-w-2xl space-y-4 rounded-lg border bg-white p-6">
         <Field label="Campaign name">

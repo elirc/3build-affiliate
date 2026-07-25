@@ -14,6 +14,10 @@ export const envSchema = z.object({
   JWT_REFRESH_TTL: z.string().default('30d'),
   PLATFORM_FEE_PERCENT: z.coerce.number().min(0).max(50).default(5),
   DISABLE_WORKERS: boolFromString(false),
+
+  // Shared secret for service-to-service calls from the redirect service.
+  // Not a user credential: it authenticates a deployable, not a person.
+  INTERNAL_API_TOKEN: z.string().min(20),
 });
 
 export const env = envSchema.parse(process.env);

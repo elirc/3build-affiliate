@@ -7,7 +7,16 @@ import { prisma } from '../config/prisma';
 import { redis } from '../config/redis';
 
 const CACHE_KEY = (code: string) => `link:${code}`;
-const CACHE_TTL_SECONDS = 3600;
+
+/**
+ * Kept in step with POSITIVE_TTL_SECONDS in the redirect service's resolver.
+ *
+ * This TTL is a backstop, not the correctness mechanism: writes invalidate
+ * explicitly, and a cache miss now falls back to the database via the
+ * internal lookup endpoint. Before that existed, this value was 3600 and a
+ * link silently stopped working an hour after it was created.
+ */
+const CACHE_TTL_SECONDS = 86_400;
 
 export function trackingService() {
   const links = trackingLinkRepository(prisma);
@@ -16,6 +25,17 @@ export function trackingService() {
 
   async function cacheLink(code: string, payload: CachedTrackingLink) {
     await redis.set(CACHE_KEY(code), JSON.stringify(payload), 'EX', CACHE_TTL_SECONDS);
+  }
+
+  /**
+   * Drop a cached entry so the next click re-reads from the database.
+   *
+   * Used instead of rewriting the entry when the new value is not already in
+   * hand. Deleting is safe because a miss is now recoverable; before the
+   * resolver existed, deleting a key would have broken the link outright.
+   */
+  async function invalidateLink(code: string) {
+    await redis.del(CACHE_KEY(code));
   }
 
   return {
@@ -91,8 +111,33 @@ export function trackingService() {
           cookieLifetimeDays: campaign.cookieLifetimeDays,
           isActive,
         });
+      } else {
+        // No campaign to build a full entry from. Drop the stale one rather
+        // than leaving a cached `isActive: true` behind.
+        await invalidateLink(link.shortCode);
       }
       return updated;
+    },
+
+    /**
+     * Authoritative lookup for the redirect service's cache-miss path.
+     *
+     * Deliberately does not consult Redis: the caller has already missed, and
+     * re-reading the cache here would just add a hop. The caller owns writing
+     * the result back.
+     */
+    async resolveForRedirect(shortCode: string): Promise<CachedTrackingLink | null> {
+      const link = await links.findByShortCodeForRedirect(shortCode);
+      if (!link) return null;
+
+      return {
+        id: link.id,
+        affiliateId: link.affiliateId,
+        campaignId: link.campaignId,
+        destinationUrl: link.destinationUrl,
+        cookieLifetimeDays: link.campaign.cookieLifetimeDays,
+        isActive: link.isActive,
+      };
     },
   };
 }

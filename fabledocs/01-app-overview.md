@@ -344,7 +344,7 @@ These are *not built*, rather than broken. Each maps to a user story in
 | --- | --- | --- | --- |
 | 1 | Campaigns are created as `DRAFT` and **no UI can activate them** | A brand can create a campaign and then hit a dead end: it never appears on `/programs`, affiliates can't apply, links can't be created | US-01 |
 | 2 | The affiliate "Tracking Links" page is read-only | `POST /api/affiliate/links` and `PATCH /api/affiliate/links/:id` exist but nothing in the UI calls them | US-02 |
-| 3 | Redis link cache has a **1-hour TTL and no rehydration** | One hour after a link is created, every click on it 302s to `DEFAULT_FALLBACK_URL` and earns nothing. Same after any Redis restart. This is the single most damaging gap | US-03 |
+| 3 | ~~Redis link cache has a **1-hour TTL and no rehydration**~~ **FIXED** | Was: one hour after a link was created, every click 302'd to `DEFAULT_FALLBACK_URL` and earned nothing. The redirect service now resolves misses via `GET /internal/links/:shortCode` and repopulates the cache — see `apps/redirect/src/link-resolver.ts` | US-03 ✅ |
 | 4 | No route protection, no token refresh in the web app | Any URL renders for a logged-out user (with failing queries); after 15 minutes a logged-in user silently starts getting 401s. `POST /api/auth/refresh` exists but nothing calls it | US-04 |
 | 5 | `POST /api/conversions/:campaignId` is **unauthenticated** | Anyone on the internet can fabricate sales against any campaign | US-05 |
 | 6 | Payouts never leave `PENDING` | No admin route moves a payout to `PAID`, so commissions never reach `PAID` and the affiliate's "Paid lifetime" is permanently `$0.00`. `reviewPayoutSchema` exists in `shared` but is unused. There's also no payout history endpoint | US-06, US-07 |
@@ -365,14 +365,19 @@ These are *not built*, rather than broken. Each maps to a user story in
 
 ### Traps that have already bitten people
 
-- **`DISABLE_WORKERS` doesn't work the way it reads.** It's parsed with
-  `z.coerce.boolean()` (`config/env.ts:15`), and `Boolean("false") === true`.
-  Setting `DISABLE_WORKERS=false` in `.env` **disables the workers**. Leave the
-  variable unset, or fix it with a `z.enum(['true','false']).transform(...)`.
-- **There is no `prisma/migrations/` directory.** The first
-  `npm run db:migrate` generates the initial migration. Commit it.
-- **The repo has no commits and no `node_modules`.** `git log` fails on a fresh
-  clone-less checkout; run `npm install` first.
+- ~~**`DISABLE_WORKERS` doesn't work the way it reads.**~~ **FIXED.** It was
+  parsed with `z.coerce.boolean()`, and `Boolean("false") === true`, so
+  `DISABLE_WORKERS=false` *disabled* the workers. Now parsed by
+  `boolFromString` in `config/env-parsers.ts`, which accepts only `"true"` or
+  `"false"` and rejects anything else at boot.
+- ~~**There is no `prisma/migrations/` directory.**~~ **FIXED.** The initial
+  migration is committed. `npm run db:migrate` from the repo root applies it.
+- ~~**Nothing loads `.env`.**~~ **FIXED.** This was never in the original list
+  because it was found while verifying setup: no package depended on `dotenv`
+  and `env.ts` read `process.env` directly, so the documented
+  `cp .env.example .env` did nothing. The dev/start scripts now pass Node's
+  `--env-file-if-exists=../../.env`.
+- **The repo has no `node_modules` on a fresh clone.** Run `npm install` first.
 - **Two different list-response shapes.** `/api/brand/campaigns` returns
   `{ items, total, page, pageSize }`; `/api/brand/conversions`,
   `/api/affiliate/links`, `/api/brand/affiliates` return bare arrays. Check

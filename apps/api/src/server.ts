@@ -15,6 +15,7 @@ import { payoutRoutes } from './routes/payout.routes';
 import { relationshipRoutes } from './routes/relationship.routes';
 import { analyticsRoutes } from './routes/analytics.routes';
 import { adminRoutes } from './routes/admin.routes';
+import { internalRoutes } from './routes/internal.routes';
 import { startClickEventWorker } from './workers/click-event.worker';
 import { startLockExpiryWorker } from './workers/lock-expiry.worker';
 
@@ -45,6 +46,10 @@ async function build() {
   await app.register(relationshipRoutes, { prefix: '/api' });
   await app.register(analyticsRoutes, { prefix: '/api' });
   await app.register(adminRoutes, { prefix: '/api' });
+
+  // No /api prefix: these are service-to-service, and keeping them on a
+  // distinct path lets a proxy refuse them from the public internet.
+  await app.register(internalRoutes);
 
   return app;
 }

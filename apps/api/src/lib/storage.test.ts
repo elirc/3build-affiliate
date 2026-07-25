@@ -42,10 +42,15 @@ describe('LocalDiskStorage', () => {
   it('refuses a key that escapes the root', async () => {
     // Cannot happen with generated keys, which is exactly why the check has to
     // be here rather than assumed at every call site.
+    //
+    // Forward slashes only. A backslash is a path separator on Windows and an
+    // ordinary filename character on Linux, so asserting on a backslash path
+    // passes on one platform and fails on the other. An attacker sending this
+    // over HTTP sends a URL path, which uses forward slashes regardless of
+    // what the server runs on.
     await expect(storage.get('../../../etc/passwd')).rejects.toThrow(/outside the root/);
-    await expect(storage.delete('..\\..\\windows\\system32')).rejects.toThrow(
-      /outside the root/
-    );
+    await expect(storage.delete('../../secrets')).rejects.toThrow(/outside the root/);
+    await expect(storage.get('../')).rejects.toThrow(/outside the root/);
   });
 
   it('deletes without complaining about a missing file', async () => {

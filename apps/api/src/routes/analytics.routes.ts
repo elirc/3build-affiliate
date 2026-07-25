@@ -3,10 +3,50 @@ import { z } from 'zod';
 import { analyticsService } from '../services/analytics.service';
 import { breakdownService, subIdService } from '../services/breakdown.service';
 import { requireAuth, requireRole, type AuthedRequest } from '../lib/auth';
+import { rangeFromDays, resolveRange } from '@affiliate/analytics';
+import { Errors } from '../lib/errors';
 
 const seriesQuerySchema = z.object({
   days: z.coerce.number().int().min(1).max(90).default(30),
 });
+
+/**
+ * `days` is kept alongside `from`/`to` rather than replaced: existing links
+ * and bookmarks use it, and a shorthand for "the last 30 days" is genuinely
+ * more convenient than spelling out two timestamps.
+ */
+const rangeQuerySchema = z.object({
+  days: z.coerce.number().int().min(1).max(365).optional(),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+  compare: z.enum(['true', 'false']).default('false'),
+});
+
+const RANGE_ERRORS: Record<string, string> = {
+  end_before_start: 'The end of the range is before its start',
+  range_too_long: 'Ranges are limited to 365 days',
+  start_in_future: 'The start of the range is in the future',
+};
+
+function parseRange(query: unknown) {
+  const q = rangeQuerySchema.parse(query);
+
+  // `days` wins when both are given, because it is the simpler intent and
+  // mixing the two is more likely a bug than a request.
+  if (q.days !== undefined) {
+    return { window: rangeFromDays(q.days), compare: q.compare === 'true' };
+  }
+
+  const resolved = resolveRange(
+    q.from ? new Date(q.from) : undefined,
+    q.to ? new Date(q.to) : undefined
+  );
+  if (!resolved.ok) {
+    throw Errors.invalidRequest('INVALID_RANGE', RANGE_ERRORS[resolved.reason]!);
+  }
+
+  return { window: resolved.range, compare: q.compare === 'true' };
+}
 
 const breakdownQuerySchema = z.object({
   days: z.coerce.number().int().min(1).max(90).default(30),
@@ -45,8 +85,8 @@ export async function analyticsRoutes(app: FastifyInstance) {
     { preHandler: [requireAuth, requireRole('BRAND')] },
     async (req) => {
       const user = (req as AuthedRequest).user;
-      const { days } = seriesQuerySchema.parse(req.query);
-      return svc.forBrand(user.id, days);
+      const { window, compare } = parseRange(req.query);
+      return svc.forBrand(user.id, window, compare);
     }
   );
 
@@ -55,8 +95,8 @@ export async function analyticsRoutes(app: FastifyInstance) {
     { preHandler: [requireAuth, requireRole('AFFILIATE')] },
     async (req) => {
       const user = (req as AuthedRequest).user;
-      const { days } = seriesQuerySchema.parse(req.query);
-      return svc.forAffiliate(user.id, days);
+      const { window, compare } = parseRange(req.query);
+      return svc.forAffiliate(user.id, window, compare);
     }
   );
 

@@ -1,4 +1,11 @@
-import { buildDailySeries, epc, safeRate } from '@affiliate/analytics';
+import {
+  buildDailySeries,
+  comparePeriods,
+  epc,
+  previousPeriod,
+  safeRate,
+  type DateRange,
+} from '@affiliate/analytics';
 import type { DailyMetric } from '@affiliate/shared';
 import { prisma } from '../config/prisma';
 
@@ -13,11 +20,7 @@ const DEFAULT_DAYS = 30;
  * query builder) and fill in zero-days client-side.
  */
 export function analyticsService() {
-  async function range(scope: Scope, days = DEFAULT_DAYS) {
-    const end = new Date();
-    const start = new Date(end.getTime() - days * 86400 * 1000);
-    return { start, end };
-  }
+
 
   async function clicksByDay(scope: Scope, start: Date, end: Date) {
     if ('brandId' in scope) {
@@ -71,8 +74,36 @@ export function analyticsService() {
     `;
   }
 
-  async function buildResponse(scope: Scope, days: number) {
-    const { start, end } = await range(scope, days);
+  /** The daily series for a window, plus its totals. */
+  async function seriesFor(scope: Scope, window: DateRange) {
+    const [clicks, convs] = await Promise.all([
+      clicksByDay(scope, window.start, window.end),
+      conversionsByDay(scope, window.start, window.end),
+    ]);
+
+    const series: DailyMetric[] = buildDailySeries(
+      window.start,
+      window.end,
+      clicks.map((r) => ({ date: r.date, count: Number(r.count) })),
+      convs.map((r) => ({
+        date: r.date,
+        count: Number(r.count),
+        revenue: Number(r.revenue),
+        commission: Number(r.commission),
+      }))
+    );
+
+    return {
+      series,
+      clicks: series.reduce((s, d) => s + d.clicks, 0),
+      conversions: series.reduce((s, d) => s + d.conversions, 0),
+      revenue: series.reduce((s, d) => s + Number(d.revenue), 0),
+      commission: series.reduce((s, d) => s + Number(d.commission), 0),
+    };
+  }
+
+  async function buildResponse(scope: Scope, window: DateRange, compare: boolean) {
+    const { start, end } = window;
     const [clicks, convs] = await Promise.all([
       clicksByDay(scope, start, end),
       conversionsByDay(scope, start, end),
@@ -94,7 +125,8 @@ export function analyticsService() {
     const totalRevenue = series.reduce((s, d) => s + Number(d.revenue), 0);
     const totalCommission = series.reduce((s, d) => s + Number(d.commission), 0);
 
-    return {
+    const response = {
+      range: { start: start.toISOString(), end: end.toISOString() },
       series,
       totals: {
         clicks: totalClicks,
@@ -105,13 +137,38 @@ export function analyticsService() {
         epc: epc(totalCommission, totalClicks),
       },
     };
+
+    if (!compare) return response;
+
+    // The immediately preceding window of the same length. Fetched only when
+    // asked for: it doubles the query cost, and most callers do not need it.
+    const previousWindow = previousPeriod(window);
+    const previous = await seriesFor(scope, previousWindow);
+
+    return {
+      ...response,
+      comparison: {
+        range: {
+          start: previousWindow.start.toISOString(),
+          end: previousWindow.end.toISOString(),
+        },
+        clicks: comparePeriods(totalClicks, previous.clicks),
+        conversions: comparePeriods(totalConversions, previous.conversions),
+        revenue: comparePeriods(totalRevenue, previous.revenue),
+        commission: comparePeriods(totalCommission, previous.commission),
+        // The full series, so the chart can overlay it. Dates are the
+        // *previous* window's, so the client aligns by index rather than by
+        // date -- the two windows have no dates in common by construction.
+        series: previous.series,
+      },
+    };
   }
 
   return {
-    forBrand: (brandId: string, days = DEFAULT_DAYS) =>
-      buildResponse({ brandId }, days),
-    forAffiliate: (affiliateId: string, days = DEFAULT_DAYS) =>
-      buildResponse({ affiliateId }, days),
+    forBrand: (brandId: string, window: DateRange, compare = false) =>
+      buildResponse({ brandId }, window, compare),
+    forAffiliate: (affiliateId: string, window: DateRange, compare = false) =>
+      buildResponse({ affiliateId }, window, compare),
   };
 }
 

@@ -6,6 +6,13 @@ import { DashboardShell } from '@/components/DashboardShell';
 import { BRAND_NAV } from '@/components/nav';
 import { AnalyticsChart } from '@/components/AnalyticsChart';
 import { BreakdownTable } from '@/components/BreakdownTable';
+import {
+  DateRangePicker,
+  StatWithDelta,
+  rangeToQuery,
+  useRangeState,
+} from '@/components/DateRangePicker';
+import type { Comparison } from '@affiliate/analytics';
 import { api } from '@/lib/api';
 
 interface AnalyticsResponse {
@@ -24,24 +31,51 @@ interface AnalyticsResponse {
     conversionRate: number;
     epc: string;
   };
+  comparison?: {
+    clicks: Comparison;
+    conversions: Comparison;
+    revenue: Comparison;
+    commission: Comparison;
+    series: AnalyticsResponse['series'];
+  };
 }
 
 export default function BrandDashboard() {
   const [metric, setMetric] = useState<'clicks' | 'conversions' | 'revenue' | 'commission'>(
     'revenue'
   );
+  const range = useRangeState();
+  const query = rangeToQuery(range);
+
   const { data } = useQuery({
-    queryKey: ['brand-analytics'],
-    queryFn: () => api<AnalyticsResponse>('/api/brand/analytics?days=30'),
+    queryKey: ['brand-analytics', query],
+    queryFn: () => api<AnalyticsResponse>(`/api/brand/analytics?${query}`),
   });
 
   return (
     <DashboardShell title="Brand" nav={BRAND_NAV}>
       <h1 className="text-2xl font-semibold">Overview</h1>
+
+      <div className="mt-4">
+        <DateRangePicker />
+      </div>
+
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-4">
-        <Stat label="Clicks (30d)" value={data?.totals.clicks ?? '—'} />
-        <Stat label="Conversions" value={data?.totals.conversions ?? '—'} />
-        <Stat label="Revenue" value={data ? `$${data.totals.revenue}` : '—'} />
+        <StatWithDelta
+          label="Clicks"
+          value={data?.totals.clicks ?? '—'}
+          comparison={data?.comparison?.clicks}
+        />
+        <StatWithDelta
+          label="Conversions"
+          value={data?.totals.conversions ?? '—'}
+          comparison={data?.comparison?.conversions}
+        />
+        <StatWithDelta
+          label="Revenue"
+          value={data ? `${data.totals.revenue}` : '—'}
+          comparison={data?.comparison?.revenue}
+        />
         <Stat label="Conv. rate" value={data ? `${data.totals.conversionRate}%` : '—'} />
       </div>
       <div className="mt-6 flex gap-2 text-sm">

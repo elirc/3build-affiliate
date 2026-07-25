@@ -43,3 +43,6 @@ coverage/
 # Docker volumes
 pg_data/
 redis_data/
+
+# Uploaded creative assets (local storage driver)
+apps/api/storage/

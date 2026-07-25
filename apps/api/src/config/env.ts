@@ -31,6 +31,10 @@ export const envSchema = z.object({
   // legitimate traffic and must not be throttled by the same bucket as the
   // dashboard.
   POSTBACK_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(1000),
+
+  // Where creative uploads are written. Local disk for now; the ObjectStorage
+  // interface in lib/storage.ts is the seam for moving to S3.
+  ASSET_STORAGE_PATH: z.string().default("./storage/assets"),
 });
 
 export const env = envSchema.parse(process.env);

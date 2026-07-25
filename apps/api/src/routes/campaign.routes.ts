@@ -3,6 +3,7 @@ import {
   createApiKeySchema,
   createCampaignSchema,
   listCampaignsQuerySchema,
+  transitionCampaignSchema,
   updateCampaignSchema,
 } from '@affiliate/shared';
 import { campaignService } from '../services/campaign.service';
@@ -53,6 +54,17 @@ export async function campaignRoutes(app: FastifyInstance) {
       const input = updateCampaignSchema.parse(req.body);
       const user = (req as AuthedRequest).user;
       return svc.update(user.id, id, input);
+    }
+  );
+
+  app.post(
+    '/brand/campaigns/:id/transition',
+    { preHandler: [requireAuth, requireRole('BRAND')] },
+    async (req) => {
+      const { id } = req.params as { id: string };
+      const { to } = transitionCampaignSchema.parse(req.body);
+      const user = (req as AuthedRequest).user;
+      return svc.transition(user.id, id, to);
     }
   );
 

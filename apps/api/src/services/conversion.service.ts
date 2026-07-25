@@ -1,4 +1,4 @@
-import { calculateCommission, attribute } from '@affiliate/analytics';
+import { acceptsConversions, calculateCommission, attribute } from '@affiliate/analytics';
 import { Errors } from '../lib/errors';
 import { hashEmail } from '../lib/hash';
 import type { CommissionStructure, ReportConversionInput, ReviewConversionInput } from '@affiliate/shared';
@@ -21,6 +21,16 @@ export function conversionService() {
     async report(campaignId: string, input: ReportConversionInput) {
       const campaign = await campaigns.findById(campaignId);
       if (!campaign) throw Errors.notFound('Campaign');
+
+      // PAUSED still accepts sales: a conversion can legitimately land days
+      // after the click that earned it, and refusing those would quietly rob
+      // affiliates of commission they had already earned. ENDED does not --
+      // that is what ending a campaign means.
+      if (!acceptsConversions(campaign.status)) {
+        throw Errors.unprocessable(
+          `Campaign is ${campaign.status.toLowerCase()} and no longer accepts conversions`
+        );
+      }
 
       const duplicate = await prisma.conversion.findFirst({
         where: {

@@ -13,6 +13,17 @@ export class AppError extends Error {
 export const Errors = {
   badRequest: (msg: string, details?: unknown) =>
     new AppError(400, 'BAD_REQUEST', msg, details),
+
+  /**
+   * A 400 with a specific machine-readable code.
+   *
+   * Clients branch on `code`, not on the message. State machines in
+   * particular need a code a UI can recognise ("INVALID_TRANSITION") so it
+   * can re-fetch and re-render the buttons rather than showing a toast and
+   * leaving stale controls on screen.
+   */
+  invalidRequest: (code: string, msg: string, details?: unknown) =>
+    new AppError(400, code, msg, details),
   unauthorized: (msg = 'Authentication required') =>
     new AppError(401, 'UNAUTHORIZED', msg),
   forbidden: (msg = 'Forbidden') => new AppError(403, 'FORBIDDEN', msg),

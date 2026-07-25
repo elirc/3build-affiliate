@@ -1,3 +1,4 @@
+import { acceptsNewAffiliates } from '@affiliate/analytics';
 import { Errors } from '../lib/errors';
 import { brandAffiliateRepository } from '../repositories/brand-affiliate.repository';
 import { campaignRepository } from '../repositories/campaign.repository';
@@ -18,7 +19,11 @@ export function relationshipService() {
     async apply(affiliateId: string, input: ApplyToCampaignInput) {
       const campaign = await campaigns.findById(input.campaignId);
       if (!campaign) throw Errors.notFound('Campaign');
-      if (campaign.status !== 'ACTIVE') throw Errors.badRequest('Campaign is not active');
+      if (!acceptsNewAffiliates(campaign.status)) {
+        throw Errors.badRequest(
+          `This campaign is ${campaign.status.toLowerCase()} and is not accepting applications`
+        );
+      }
 
       const existing = await repo.findByPair(campaign.brandId, affiliateId);
       if (existing) {

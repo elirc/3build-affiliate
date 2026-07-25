@@ -51,6 +51,17 @@ async function buildApp() {
       if (!link) return reply.redirect(FALLBACK_URL, 302);
       if (!link.isActive) return reply.redirect(FALLBACK_URL, 302);
 
+      // An ended campaign still gets the shopper to the brand rather than to
+      // a generic placeholder -- the click is already paid for, so wasting it
+      // helps nobody. No click event is recorded: the campaign is over and
+      // this traffic can never convert.
+      //
+      // `undefined` means the entry was cached before this field existed;
+      // treat that as "keep serving", which is the previous behaviour.
+      if (link.campaignStatus === 'ENDED') {
+        return reply.redirect(link.campaignLandingPageUrl ?? FALLBACK_URL, 302);
+      }
+
       let cookieId = request.cookies?.attribution_id;
       if (!cookieId) cookieId = crypto.randomUUID();
 

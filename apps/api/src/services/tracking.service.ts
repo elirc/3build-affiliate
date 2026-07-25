@@ -1,3 +1,4 @@
+import { acceptsNewAffiliates } from '@affiliate/analytics';
 import { Errors } from '../lib/errors';
 import { generateShortCode, MAX_TRACKING_LINKS_PER_AFFILIATE_PER_CAMPAIGN, type CachedTrackingLink, type CreateTrackingLinkInput } from '@affiliate/shared';
 import { trackingLinkRepository } from '../repositories/tracking-link.repository';
@@ -42,8 +43,12 @@ export function trackingService() {
     async create(affiliateId: string, input: CreateTrackingLinkInput) {
       const campaign = await campaigns.findById(input.campaignId);
       if (!campaign) throw Errors.notFound('Campaign');
-      if (campaign.status !== 'ACTIVE') {
-        throw Errors.badRequest('Campaign is not active');
+      if (!acceptsNewAffiliates(campaign.status)) {
+        // Naming the actual status matters: "not active" leaves an affiliate
+        // guessing whether to wait (PAUSED) or give up (ENDED).
+        throw Errors.badRequest(
+          `This campaign is ${campaign.status.toLowerCase()} and is not accepting new links`
+        );
       }
 
       await relationships.assertApproved(campaign.brandId, affiliateId);
@@ -137,6 +142,8 @@ export function trackingService() {
         destinationUrl: link.destinationUrl,
         cookieLifetimeDays: link.campaign.cookieLifetimeDays,
         isActive: link.isActive,
+        campaignStatus: link.campaign.status,
+        campaignLandingPageUrl: link.campaign.landingPageUrl,
       };
     },
   };

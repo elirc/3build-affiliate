@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { applyToCampaignSchema } from '@affiliate/shared';
+import { applyToCampaignSchema, setCustomCommissionSchema } from '@affiliate/shared';
 import { z } from 'zod';
 import { relationshipService } from '../services/relationship.service';
 import { requireAuth, requireRole, type AuthedRequest } from '../lib/auth';
@@ -39,6 +39,27 @@ export async function relationshipRoutes(app: FastifyInstance) {
       const user = (req as AuthedRequest).user;
       const { status } = req.query as { status?: string };
       return svc.listForBrand(user.id, status);
+    }
+  );
+
+  app.put(
+    '/brand/affiliates/:id/commission',
+    { preHandler: [requireAuth, requireRole('BRAND')] },
+    async (req) => {
+      const { id } = req.params as { id: string };
+      const { commissionStructure } = setCustomCommissionSchema.parse(req.body);
+      const user = (req as AuthedRequest).user;
+      return svc.setCustomCommission(user.id, id, commissionStructure, user.id);
+    }
+  );
+
+  app.get(
+    '/brand/affiliates/:id/commission/history',
+    { preHandler: [requireAuth, requireRole('BRAND')] },
+    async (req) => {
+      const { id } = req.params as { id: string };
+      const user = (req as AuthedRequest).user;
+      return svc.overrideHistory(user.id, id);
     }
   );
 

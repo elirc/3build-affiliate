@@ -63,6 +63,15 @@ export const createCampaignSchema = z.object({
  */
 export const updateCampaignSchema = createCampaignSchema.partial().strict();
 
+/**
+ * null clears the override and restores the campaign default. Distinguishing
+ * "clear it" from "leave it alone" is why this is nullable rather than
+ * optional.
+ */
+export const setCustomCommissionSchema = z.object({
+  commissionStructure: commissionStructureSchema.nullable(),
+});
+
 export const transitionCampaignSchema = z.object({
   to: z.enum(['DRAFT', 'ACTIVE', 'PAUSED', 'ENDED']),
 });
@@ -77,4 +86,5 @@ export const listCampaignsQuerySchema = z.object({
 export type CreateCampaignInput = z.infer<typeof createCampaignSchema>;
 export type UpdateCampaignInput = z.infer<typeof updateCampaignSchema>;
 export type TransitionCampaignInput = z.infer<typeof transitionCampaignSchema>;
+export type SetCustomCommissionInput = z.infer<typeof setCustomCommissionSchema>;
 export type ListCampaignsQuery = z.infer<typeof listCampaignsQuerySchema>;

@@ -3,7 +3,9 @@ import {
   attribute,
   calculateCommission,
   calculateRefund,
+  resolveCommissionStructure,
 } from '@affiliate/analytics';
+import { commissionStructureSchema } from '@affiliate/shared';
 import { Errors } from '../lib/errors';
 import { hashEmail } from '../lib/hash';
 import type {
@@ -16,6 +18,15 @@ import { conversionRepository } from '../repositories/conversion.repository';
 import { campaignRepository } from '../repositories/campaign.repository';
 import { fraudService } from './fraud.service';
 import { prisma } from '../config/prisma';
+
+/**
+ * customCommission is a JSON column, so its contents are not guaranteed by the
+ * database. Validating with the same schema the write path uses means a bad
+ * row degrades to the campaign default rather than throwing mid-transaction.
+ */
+function isCommissionStructure(value: unknown): value is CommissionStructure {
+  return commissionStructureSchema.safeParse(value).success;
+}
 
 export function conversionService() {
   const conversions = conversionRepository(prisma);
@@ -101,9 +112,28 @@ export function conversionService() {
           const priorCount = await tx.conversion.count({
             where: { affiliateId: share.affiliateId, campaignId, status: 'APPROVED' },
           });
+
+          // Read inside the transaction so the rate reflects the moment the
+          // sale is recorded, not whatever it was when the request arrived.
+          const relationship = await tx.brandAffiliate.findUnique({
+            where: {
+              brandId_affiliateId: {
+                brandId: campaign.brandId,
+                affiliateId: share.affiliateId,
+              },
+            },
+            select: { status: true, customCommission: true },
+          });
+
+          const { structure } = resolveCommissionStructure(
+            campaign.commissionStructure as unknown as CommissionStructure,
+            relationship,
+            isCommissionStructure
+          );
+
           const splitValue = Number(input.conversionValue) * share.share;
           const commissionAmount = calculateCommission(
-            campaign.commissionStructure as unknown as CommissionStructure,
+            structure,
             splitValue,
             priorCount
           );

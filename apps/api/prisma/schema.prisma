@@ -73,6 +73,8 @@ model BrandAffiliate {
   rejectedAt    DateTime?
   deactivatedAt DateTime?
 
+  overrideEvents CommissionOverrideEvent[]
+
   @@unique([brandId, affiliateId])
   @@index([brandId, status])
   @@index([affiliateId, status])
@@ -374,6 +376,24 @@ enum PayoutMethod {
   STRIPE_CONNECT
   PAYPAL
   MANUAL
+}
+
+/// Audit of per-affiliate commission overrides.
+///
+/// The override itself lives on BrandAffiliate as a single JSON value, so
+/// setting a new one destroys the previous. For something that decides how
+/// much a partner is paid, "what was the rate in March and who changed it" has
+/// to be answerable.
+model CommissionOverrideEvent {
+  id             String   @id @default(cuid())
+  brandAffiliateId String
+  brandAffiliate BrandAffiliate @relation(fields: [brandAffiliateId], references: [id])
+  actorId        String
+  previousValue  Json?
+  newValue       Json?
+  createdAt      DateTime @default(now())
+
+  @@index([brandAffiliateId])
 }
 
 // ============ BALANCE ADJUSTMENTS ============

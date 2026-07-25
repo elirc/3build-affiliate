@@ -1,4 +1,5 @@
 import { UAParser } from 'ua-parser-js';
+import { normaliseSubIds } from '@affiliate/analytics';
 import { prisma } from '../config/prisma';
 import { redis } from '../config/redis';
 import { logger } from '../lib/logger';
@@ -20,6 +21,12 @@ const BATCH_MAX = 100;
  * instead of starting an interval and sleeping long enough to hope one fired.
  * A test that sleeps is a test that is either slow or flaky, usually both.
  */
+function cappedSubIds(raw: Record<string, string> | undefined) {
+  if (!raw) return undefined;
+  const { subIds } = normaliseSubIds(raw);
+  return Object.keys(subIds).length > 0 ? subIds : undefined;
+}
+
 export async function drainClickEvents(): Promise<{ flushed: number }> {
   const events: ClickEventPayload[] = [];
   for (let i = 0; i < BATCH_MAX; i++) {
@@ -53,7 +60,15 @@ export async function drainClickEvents(): Promise<{ flushed: number }> {
           browser,
           os,
           attributionCookieId: e.cookieId,
-          subIds: e.subIds && Object.keys(e.subIds).length > 0 ? e.subIds : undefined,
+          // Capped again here, not only at the redirect edge.
+          //
+          // The edge is where the caps belong for latency reasons, but this
+          // worker consumes a Redis list -- it does not know who wrote to it,
+          // and "the producer already validated this" is exactly the
+          // assumption that stops being true when a second producer appears.
+          // Enforcing it where the data is stored is what actually bounds the
+          // column.
+          subIds: cappedSubIds(e.subIds),
         },
       });
     }

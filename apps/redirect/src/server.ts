@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import { Redis } from 'ioredis';
 import crypto from 'node:crypto';
+import { normaliseSubIds } from '@affiliate/analytics';
 import { createApiFetchLink, createLinkResolver } from './link-resolver';
 
 const PORT = Number(process.env.REDIRECT_PORT ?? 3002);
@@ -73,10 +74,10 @@ async function buildApp() {
         path: '/',
       });
 
-      const subIds: Record<string, string> = {};
-      for (const [k, v] of Object.entries(request.query ?? {})) {
-        if (!k.startsWith('_')) subIds[k] = String(v);
-      }
+      // Capped at the edge. These come from a query string on the busiest
+      // endpoint in the system and end up in a JSON column, so an unbounded
+      // one lets anyone grow the database a request at a time.
+      const { subIds } = normaliseSubIds(request.query ?? {});
 
       // Fire and forget on purpose: losing a click is better than making a
       // shopper wait on our queue.

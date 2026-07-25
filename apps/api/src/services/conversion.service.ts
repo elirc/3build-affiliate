@@ -6,6 +6,7 @@ import {
   resolveCommissionStructure,
 } from '@affiliate/analytics';
 import { commissionStructureSchema } from '@affiliate/shared';
+import { Prisma } from '@prisma/client';
 import { Errors } from '../lib/errors';
 import { hashEmail } from '../lib/hash';
 import type {
@@ -81,6 +82,7 @@ export function conversionService() {
               id: true,
               trackingLinkId: true,
               timestamp: true,
+              subIds: true,
               trackingLink: { select: { affiliateId: true } },
             },
             orderBy: { timestamp: 'asc' },
@@ -134,6 +136,9 @@ export function conversionService() {
             isCommissionStructure
           );
 
+          const attributedClick = clicks.find(
+            (c) => c.trackingLinkId === share.trackingLinkId
+          );
           const splitValue = Number(input.conversionValue) * share.share;
           const commissionAmount = calculateCommission(
             structure,
@@ -146,9 +151,10 @@ export function conversionService() {
               trackingLinkId: share.trackingLinkId,
               campaignId,
               affiliateId: share.affiliateId,
-              clickEventId:
-                clicks.find((c) => c.trackingLinkId === share.trackingLinkId)?.id ??
-                null,
+              clickEventId: attributedClick?.id ?? null,
+              // Copied from the click, so a placement stays attributable even
+              // after click events are pruned.
+              subIds: (attributedClick?.subIds as Prisma.InputJsonValue) ?? Prisma.DbNull,
               externalOrderId:
                 input.externalOrderId +
                 (shares.length > 1 ? `:${share.affiliateId}` : ''),

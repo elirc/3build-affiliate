@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { analyticsService } from '../services/analytics.service';
-import { breakdownService } from '../services/breakdown.service';
+import { breakdownService, subIdService } from '../services/breakdown.service';
 import { requireAuth, requireRole, type AuthedRequest } from '../lib/auth';
 
 const seriesQuerySchema = z.object({
@@ -20,9 +20,20 @@ const breakdownQuerySchema = z.object({
   includePending: z.enum(['true', 'false']).default('false'),
 });
 
+const subIdQuerySchema = z.object({
+  /**
+   * The JSON key to group by. Bound as a parameter to `->>`, not
+   * interpolated -- unlike a column name, a JSON key *can* be a bind
+   * parameter, so there is no reason to whitelist it.
+   */
+  key: z.string().min(1).max(40),
+  days: z.coerce.number().int().min(1).max(90).default(30),
+});
+
 export async function analyticsRoutes(app: FastifyInstance) {
   const svc = analyticsService();
   const breakdown = breakdownService();
+  const subIds = subIdService();
 
   const parseBreakdown = (query: unknown) => {
     const q = breakdownQuerySchema.parse(query);
@@ -86,6 +97,31 @@ export async function analyticsRoutes(app: FastifyInstance) {
     async (req) => {
       const user = (req as AuthedRequest).user;
       return breakdown.forAffiliateLinks(user.id, parseBreakdown(req.query));
+    }
+  );
+
+  // ---- Sub-IDs ----------------------------------------------------------
+  // The tags an affiliate puts on their own links, so they can tell one
+  // placement from another. Captured since the first commit and, until now,
+  // read by nothing.
+
+  app.get(
+    '/affiliate/analytics/subids/keys',
+    { preHandler: [requireAuth, requireRole('AFFILIATE')] },
+    async (req) => {
+      const user = (req as AuthedRequest).user;
+      const { days } = seriesQuerySchema.parse(req.query);
+      return subIds.keys(user.id, days);
+    }
+  );
+
+  app.get(
+    '/affiliate/analytics/subids',
+    { preHandler: [requireAuth, requireRole('AFFILIATE')] },
+    async (req) => {
+      const user = (req as AuthedRequest).user;
+      const { key, days } = subIdQuerySchema.parse(req.query);
+      return subIds.report(user.id, key, days);
     }
   );
 }

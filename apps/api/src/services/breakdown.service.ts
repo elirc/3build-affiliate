@@ -288,3 +288,89 @@ export function breakdownService() {
     },
   };
 }
+
+/**
+ * Sub-ID performance for one affiliate.
+ *
+ * Kept apart from `breakdownService` because it groups by a JSON key rather
+ * than a column, which needs a different shape: the key is a bind parameter
+ * feeding `->>`, and the set of possible values is not known in advance.
+ */
+export function subIdService() {
+  return {
+    /** The sub-ID keys this affiliate has actually used, for a picker. */
+    async keys(affiliateId: string, days = DEFAULT_DAYS): Promise<string[]> {
+      const { start, end } = windowFor(days);
+      const rows = await prisma.$queryRaw<Array<{ key: string }>>`
+        SELECT DISTINCT jsonb_object_keys(ce."subIds"::jsonb) AS key
+        FROM "ClickEvent" ce
+        JOIN "TrackingLink" tl ON tl.id = ce."trackingLinkId"
+        WHERE tl."affiliateId" = ${affiliateId}
+          AND ce."subIds" IS NOT NULL
+          AND ce."timestamp" >= ${start} AND ce."timestamp" <= ${end}
+        ORDER BY key
+        LIMIT 50
+      `;
+      return rows.map((r) => r.key);
+    },
+
+    /**
+     * Clicks, conversions and revenue grouped by the value of one sub-ID key.
+     *
+     * Clicks come from ClickEvent and conversions from the snapshot on
+     * Conversion, joined on the value rather than on a row. Joining the two
+     * tables directly would multiply them together -- the same fan-out the
+     * campaign breakdowns avoid.
+     */
+    async report(affiliateId: string, key: string, days = DEFAULT_DAYS) {
+      const { start, end } = windowFor(days);
+
+      const rows = await prisma.$queryRaw<
+        Array<{
+          value: string;
+          total_clicks: bigint;
+          total_conversions: bigint;
+          total_revenue: string;
+          total_commission: string;
+        }>
+      >`
+        WITH clicks AS (
+          SELECT ce."subIds"::jsonb ->> ${key} AS value, COUNT(*) AS n
+          FROM "ClickEvent" ce
+          JOIN "TrackingLink" tl ON tl.id = ce."trackingLinkId"
+          WHERE tl."affiliateId" = ${affiliateId}
+            AND ce."timestamp" >= ${start} AND ce."timestamp" <= ${end}
+            AND ce."subIds"::jsonb ->> ${key} IS NOT NULL
+          GROUP BY 1
+        ),
+        convs AS (
+          SELECT co."subIds"::jsonb ->> ${key} AS value,
+                 COUNT(*) AS n,
+                 SUM(co."conversionValue") AS revenue,
+                 SUM(co."commissionAmount") AS commission
+          FROM "Conversion" co
+          WHERE co."affiliateId" = ${affiliateId}
+            AND co."occurredAt" >= ${start} AND co."occurredAt" <= ${end}
+            AND co."status" = 'APPROVED'
+            AND co."subIds"::jsonb ->> ${key} IS NOT NULL
+          GROUP BY 1
+        )
+        SELECT COALESCE(clicks.value, convs.value)   AS value,
+               COALESCE(clicks.n, 0)::bigint         AS total_clicks,
+               COALESCE(convs.n, 0)::bigint          AS total_conversions,
+               COALESCE(convs.revenue, 0)::text      AS total_revenue,
+               COALESCE(convs.commission, 0)::text   AS total_commission
+        FROM clicks
+        FULL OUTER JOIN convs ON convs.value = clicks.value
+        ORDER BY total_revenue DESC, total_clicks DESC
+        LIMIT 200
+      `;
+
+      return rows.map((r) => ({
+        value: r.value,
+        ...totals(r),
+        epc: epc(Number(r.total_commission), Number(r.total_clicks)),
+      }));
+    },
+  };
+}

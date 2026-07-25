@@ -253,6 +253,14 @@ model Conversion {
   customerEmailHash   String?
   isFirstTimeCustomer Boolean @default(true)
 
+  /// Sub-IDs copied from the click that earned this conversion.
+  ///
+  /// Denormalised deliberately. The alternative is joining back through
+  /// clickEventId, which is nullable and points at a row that may be pruned
+  /// long before the commission is paid -- so revenue would stop being
+  /// attributable to a placement exactly when someone wants to check it.
+  subIds              Json?
+
   notes            String?
   approvedAt       DateTime?
   rejectedAt       DateTime?

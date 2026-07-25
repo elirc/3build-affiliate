@@ -92,9 +92,28 @@ export function payoutService() {
           throw Errors.badRequest('No approved commissions to pay out');
         }
 
-        const gross = approved.reduce((sum, c) => sum + Number(c.amount), 0);
+        const commissionTotal = approved.reduce((sum, c) => sum + Number(c.amount), 0);
+
+        // Unsettled clawbacks are netted off before anything else. A refund on
+        // an already-paid commission cannot be undone by changing a status, so
+        // it waits here as a negative adjustment until the next payout.
+        const adjustments = await tx.balanceAdjustment.findMany({
+          where: { affiliateId, settledPayoutId: null },
+          select: { id: true, amount: true },
+        });
+        const adjustmentTotal = adjustments.reduce(
+          (sum, a) => sum + Number(a.amount),
+          0
+        );
+
+        const gross = Math.max(0, commissionTotal + adjustmentTotal);
         if (gross < MINIMUM_PAYOUT_AMOUNT) {
-          throw Errors.badRequest(`Below minimum payout of $${MINIMUM_PAYOUT_AMOUNT}`);
+          throw Errors.badRequest(
+            adjustmentTotal < 0
+              ? `Below minimum payout of $${MINIMUM_PAYOUT_AMOUNT} after ` +
+                  `$${Math.abs(adjustmentTotal).toFixed(2)} of pending clawbacks`
+              : `Below minimum payout of $${MINIMUM_PAYOUT_AMOUNT}`
+          );
         }
 
         const breakdown = calculatePayoutBreakdown(gross, env.PLATFORM_FEE_PERCENT);
@@ -132,6 +151,16 @@ export function payoutService() {
           throw Errors.conflict(
             'Commissions changed while the payout was being created'
           );
+        }
+
+        // Mark the adjustments settled inside the same transaction, so a
+        // clawback is netted off exactly once. Applying it and forgetting to
+        // mark it would deduct the same refund from every future payout.
+        if (adjustments.length > 0) {
+          await tx.balanceAdjustment.updateMany({
+            where: { id: { in: adjustments.map((a) => a.id) } },
+            data: { settledPayoutId: payout.id },
+          });
         }
 
         await tx.payoutEvent.create({
@@ -256,13 +285,18 @@ export function payoutService() {
     },
 
     async summary(affiliateId: string) {
-      const [pending, locked, approved, inPayout, paid] = await Promise.all([
-        commissions.sumByStatus(affiliateId, 'PENDING'),
-        commissions.sumByStatus(affiliateId, 'LOCKED'),
-        commissions.sumByStatus(affiliateId, 'APPROVED'),
-        commissions.sumByStatus(affiliateId, 'INCLUDED_IN_PAYOUT'),
-        commissions.sumByStatus(affiliateId, 'PAID'),
-      ]);
+      const [pending, locked, approved, inPayout, paid, adjustments] =
+        await Promise.all([
+          commissions.sumByStatus(affiliateId, 'PENDING'),
+          commissions.sumByStatus(affiliateId, 'LOCKED'),
+          commissions.sumByStatus(affiliateId, 'APPROVED'),
+          commissions.sumByStatus(affiliateId, 'INCLUDED_IN_PAYOUT'),
+          commissions.sumByStatus(affiliateId, 'PAID'),
+          prisma.balanceAdjustment.aggregate({
+            _sum: { amount: true },
+            where: { affiliateId, settledPayoutId: null },
+          }),
+        ]);
       const num = (v: { _sum: { amount: unknown } }) =>
         Number(v._sum.amount ?? 0).toFixed(2);
       return {
@@ -274,6 +308,9 @@ export function payoutService() {
         // requested, which reads as money going missing.
         inPayout: num(inPayout),
         paid: num(paid),
+        // Negative when refunds are waiting to be netted off. Shown so an
+        // affiliate whose next payout is smaller than expected can see why.
+        pendingAdjustments: money(adjustments._sum.amount),
       };
     },
   };

@@ -18,6 +18,7 @@ const TABLES = [
   'TrackingLink',
   'CampaignApiKey',
   'CreativeAsset',
+  'BalanceAdjustment',
   'Payout',
   'Campaign',
   'BrandAffiliate',

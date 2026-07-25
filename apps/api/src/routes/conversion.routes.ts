@@ -1,5 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import { reportConversionSchema, reviewConversionSchema } from '@affiliate/shared';
+import {
+  reportConversionSchema,
+  reverseConversionSchema,
+  reviewConversionSchema,
+} from '@affiliate/shared';
 import { conversionService } from '../services/conversion.service';
 import { requireAuth, requireRole, type AuthedRequest } from '../lib/auth';
 import { requirePostbackSignature, type RawBodyRequest } from '../lib/postback-auth';
@@ -81,6 +85,20 @@ export async function conversionRoutes(app: FastifyInstance) {
       const input = reviewConversionSchema.parse(req.body);
       const user = (req as AuthedRequest).user;
       return svc.review(user.id, id, input);
+    }
+  );
+
+  // Separate from review: reversing an *approved* conversion is a different
+  // operation with different consequences, and merging the two would mean one
+  // handler where the commission may or may not already have been paid.
+  app.post(
+    '/brand/conversions/:id/reverse',
+    { preHandler: [requireAuth, requireRole('BRAND')] },
+    async (req) => {
+      const { id } = req.params as { id: string };
+      const input = reverseConversionSchema.parse(req.body);
+      const user = (req as AuthedRequest).user;
+      return svc.reverse(user.id, id, input);
     }
   );
 }

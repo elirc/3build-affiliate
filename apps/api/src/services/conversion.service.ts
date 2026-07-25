@@ -1,7 +1,17 @@
-import { acceptsConversions, calculateCommission, attribute } from '@affiliate/analytics';
+import {
+  acceptsConversions,
+  attribute,
+  calculateCommission,
+  calculateRefund,
+} from '@affiliate/analytics';
 import { Errors } from '../lib/errors';
 import { hashEmail } from '../lib/hash';
-import type { CommissionStructure, ReportConversionInput, ReviewConversionInput } from '@affiliate/shared';
+import type {
+  CommissionStructure,
+  ReportConversionInput,
+  ReverseConversionInput,
+  ReviewConversionInput,
+} from '@affiliate/shared';
 import { conversionRepository } from '../repositories/conversion.repository';
 import { campaignRepository } from '../repositories/campaign.repository';
 import { fraudService } from './fraud.service';
@@ -206,6 +216,123 @@ export function conversionService() {
         }
 
         return updated;
+      });
+    },
+
+    /**
+     * Reverses an approved conversion, in whole or in part.
+     *
+     * The lock period exists precisely so that a refund arriving after
+     * approval can still be handled. What happens depends on how far the
+     * commission has already travelled, and the interesting case is the last
+     * one: money that has already been paid cannot be un-paid by changing a
+     * status, so it becomes a negative balance adjustment netted off the
+     * affiliate's next payout.
+     */
+    async reverse(
+      brandId: string,
+      conversionId: string,
+      input: ReverseConversionInput
+    ) {
+      const conv = await conversions.findById(conversionId);
+      if (!conv) throw Errors.notFound('Conversion');
+
+      const campaign = await campaigns.findById(conv.campaignId);
+      if (!campaign || campaign.brandId !== brandId) throw Errors.forbidden();
+
+      if (conv.status !== 'APPROVED') {
+        throw Errors.badRequest(
+          conv.status === 'REJECTED'
+            ? 'This conversion has already been reversed or rejected'
+            : 'Only an approved conversion can be reversed. Reject it instead.'
+        );
+      }
+
+      const originalValue = Number(conv.conversionValue);
+      const originalCommission = Number(conv.commissionAmount);
+      const refundAmount = input.refundAmount ?? originalValue;
+
+      let outcome;
+      try {
+        outcome = calculateRefund(originalValue, originalCommission, refundAmount);
+      } catch (err) {
+        throw Errors.badRequest((err as Error).message);
+      }
+
+      const commission = await prisma.commission.findFirst({
+        where: { conversionId },
+      });
+      if (!commission) throw Errors.notFound('Commission');
+
+      // A commission already committed to an unsettled payout is the one case
+      // we refuse. Editing it would change an amount an admin is in the middle
+      // of transferring; the brand should wait for the payout to settle or
+      // fail, at which point the normal paths apply.
+      if (commission.status === 'INCLUDED_IN_PAYOUT') {
+        throw Errors.invalidRequest(
+          'COMMISSION_IN_PAYOUT',
+          'This commission is part of a payout that has not settled yet. ' +
+            'Try again once the payout has completed or failed.'
+        );
+      }
+
+      return prisma.$transaction(async (tx) => {
+        await tx.conversion.update({
+          where: { id: conversionId },
+          data: outcome.isFullRefund
+            ? {
+                status: 'REJECTED',
+                rejectedAt: new Date(),
+                rejectionReason: input.reason,
+              }
+            : {
+                // A partial refund leaves a real sale in place, so the
+                // conversion stays APPROVED with reduced figures rather than
+                // disappearing from the affiliate's history.
+                conversionValue: outcome.remainingValue,
+                commissionAmount: outcome.remainingCommission,
+                notes: input.reason,
+              },
+        });
+
+        if (commission.status === 'PAID') {
+          // The money is gone. Record what is owed back instead of pretending
+          // the commission was never paid.
+          await tx.balanceAdjustment.create({
+            data: {
+              affiliateId: conv.affiliateId,
+              amount: `-${outcome.clawbackAmount}`,
+              reason: `Refund on order ${conv.externalOrderId}: ${input.reason}`,
+              conversionId,
+            },
+          });
+        } else if (outcome.isFullRefund) {
+          await tx.commission.update({
+            where: { id: commission.id },
+            data: { status: 'CLAWED_BACK' },
+          });
+        } else {
+          await tx.commission.update({
+            where: { id: commission.id },
+            data: { amount: outcome.remainingCommission },
+          });
+        }
+
+        // Keep the denormalised counters honest. They are eventually
+        // consistent, not wrong.
+        await tx.trackingLink.update({
+          where: { id: conv.trackingLinkId },
+          data: {
+            revenue: { decrement: Number(refundAmount) },
+            ...(outcome.isFullRefund ? { conversionCount: { decrement: 1 } } : {}),
+          },
+        });
+
+        return {
+          conversionId,
+          ...outcome,
+          clawbackMethod: commission.status === 'PAID' ? 'balance_adjustment' : 'commission',
+        };
       });
     },
 

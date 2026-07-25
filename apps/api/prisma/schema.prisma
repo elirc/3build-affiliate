@@ -42,6 +42,7 @@ model User {
   conversions        Conversion[]
   fraudReviews       FraudReview[]    @relation("Reviewer")
   payoutActions      PayoutEvent[]    @relation("PayoutActor")
+  balanceAdjustments BalanceAdjustment[]
 
   @@index([email])
   @@index([role])
@@ -373,6 +374,35 @@ enum PayoutMethod {
   STRIPE_CONNECT
   PAYPAL
   MANUAL
+}
+
+// ============ BALANCE ADJUSTMENTS ============
+
+/// A correction to an affiliate's balance that is not tied to a commission's
+/// own lifecycle.
+///
+/// Needed because a commission that has already been PAID cannot be clawed
+/// back by changing its status -- the money has left. Instead we record a
+/// negative adjustment, which is netted off the affiliate's next payout. This
+/// is how an accounting system handles a reversal it cannot un-post.
+model BalanceAdjustment {
+  id              String   @id @default(cuid())
+  affiliateId     String
+  affiliate       User     @relation(fields: [affiliateId], references: [id])
+
+  /// Negative for a clawback. Positive is allowed so goodwill credits can use
+  /// the same mechanism.
+  amount          Decimal  @db.Decimal(10, 2)
+  reason          String
+  conversionId    String?
+
+  /// Set once this adjustment has been applied to a payout, so it is netted
+  /// off exactly once.
+  settledPayoutId String?
+
+  createdAt       DateTime @default(now())
+
+  @@index([affiliateId, settledPayoutId])
 }
 
 // ============ CREATIVE ASSETS ============

@@ -15,5 +15,20 @@ export const reviewConversionSchema = z.object({
   reason: z.string().max(500).optional(),
 });
 
+export const reverseConversionSchema = z.object({
+  /**
+   * Always required. A reversal takes money back from someone who has already
+   * been told they earned it, so the reason appears in their earnings view --
+   * a silent deduction destroys trust faster than the deduction itself.
+   */
+  reason: z.string().min(1).max(500),
+  /**
+   * Omit for a full refund. A partial amount reduces the commission in
+   * proportion and leaves the conversion in place.
+   */
+  refundAmount: z.number().positive().optional(),
+});
+
 export type ReportConversionInput = z.infer<typeof reportConversionSchema>;
 export type ReviewConversionInput = z.infer<typeof reviewConversionSchema>;
+export type ReverseConversionInput = z.infer<typeof reverseConversionSchema>;

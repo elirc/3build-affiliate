@@ -46,7 +46,13 @@ export async function payoutRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const input = requestPayoutSchema.parse(req.body);
       const user = (req as AuthedRequest).user;
-      const p = await svc.requestPayout(user.id, input.method);
+
+      // Standard header name, so an HTTP client with built-in retry support
+      // sets it without needing to know anything about this API.
+      const rawKey = req.headers['idempotency-key'];
+      const idempotencyKey = typeof rawKey === 'string' ? rawKey.slice(0, 200) : undefined;
+
+      const p = await svc.requestPayout(user.id, input.method, { idempotencyKey });
       reply.code(201);
       return p;
     }

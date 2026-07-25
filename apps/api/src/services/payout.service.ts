@@ -1,5 +1,6 @@
 import {
   allowedPayoutTransitions,
+  calculatePayoutBreakdown,
   canTransitionPayout,
   releasesCommissions,
   settlesCommissions,
@@ -34,53 +35,113 @@ export function payoutService() {
   const payouts = payoutRepository(prisma);
 
   return {
+    /**
+     * Bundles an affiliate's approved commissions into a payout.
+     *
+     * Everything happens inside one transaction, holding a Postgres advisory
+     * lock keyed on the affiliate. The previous version read the commissions
+     * *outside* the transaction, summed them, then claimed them inside it with
+     * an `updateMany` filtered on `status: 'APPROVED'`. Two concurrent
+     * requests both read the same set; the second `updateMany` matched zero
+     * rows, but the payout row was still created with the full amount -- a
+     * payout for money that was already in another payout.
+     *
+     * The amount is now derived from the rows actually claimed, so it cannot
+     * describe money this payout does not own.
+     */
     async requestPayout(
       affiliateId: string,
-      method: 'stripe_connect' | 'paypal' | 'manual'
+      method: 'stripe_connect' | 'paypal' | 'manual',
+      opts: { idempotencyKey?: string } = {}
     ) {
-      const approved = await commissions.listApprovedForAffiliate(affiliateId);
-      if (approved.length === 0) {
-        throw Errors.badRequest('No approved commissions to pay out');
+      if (opts.idempotencyKey) {
+        const existing = await payouts.findByIdempotencyKey(
+          affiliateId,
+          opts.idempotencyKey
+        );
+        // A client that retries after a timeout gets the payout its first
+        // attempt created, rather than a second one for the same money.
+        if (existing) return toPayoutResponse(existing);
       }
-      const gross = approved.reduce((sum, c) => sum + Number(c.amount), 0);
-      if (gross < MINIMUM_PAYOUT_AMOUNT) {
-        throw Errors.badRequest(`Below minimum payout of $${MINIMUM_PAYOUT_AMOUNT}`);
-      }
-
-      const fee = Math.round(gross * env.PLATFORM_FEE_PERCENT) / 100;
-      const net = Math.round((gross - fee) * 100) / 100;
-
-      const earliest = approved.reduce(
-        (min, c) => (c.createdAt < min ? c.createdAt : min),
-        approved[0]!.createdAt
-      );
-      const latest = approved.reduce(
-        (max, c) => (c.createdAt > max ? c.createdAt : max),
-        approved[0]!.createdAt
-      );
 
       return prisma.$transaction(async (tx) => {
+        // Serialises payout requests per affiliate for the life of this
+        // transaction. Two requests for the same affiliate queue; requests for
+        // different affiliates do not block each other. Released automatically
+        // on commit or rollback, so a crash cannot strand the lock.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`payout:${affiliateId}`}))`;
+
+        const open = await tx.payout.findFirst({
+          where: { affiliateId, status: { in: ['PENDING', 'PROCESSING'] } },
+          select: { id: true, status: true },
+        });
+        if (open) {
+          throw Errors.invalidRequest(
+            'PAYOUT_IN_FLIGHT',
+            `You already have a payout ${open.status.toLowerCase()}. ` +
+              `Wait for it to settle before requesting another.`,
+            { payoutId: open.id }
+          );
+        }
+
+        const approved = await tx.commission.findMany({
+          where: { affiliateId, status: 'APPROVED' },
+          select: { id: true, amount: true, createdAt: true },
+        });
+        if (approved.length === 0) {
+          throw Errors.badRequest('No approved commissions to pay out');
+        }
+
+        const gross = approved.reduce((sum, c) => sum + Number(c.amount), 0);
+        if (gross < MINIMUM_PAYOUT_AMOUNT) {
+          throw Errors.badRequest(`Below minimum payout of $${MINIMUM_PAYOUT_AMOUNT}`);
+        }
+
+        const breakdown = calculatePayoutBreakdown(gross, env.PLATFORM_FEE_PERCENT);
+        const dates = approved.map((c) => c.createdAt.getTime());
+
         const payout = await tx.payout.create({
           data: {
             affiliateId,
-            amount: gross.toFixed(2),
-            feeAmount: fee.toFixed(2),
-            netAmount: net.toFixed(2),
+            amount: breakdown.gross,
+            feeAmount: breakdown.fee,
+            netAmount: breakdown.net,
             currency: 'USD',
             method: method.toUpperCase() as 'STRIPE_CONNECT' | 'PAYPAL' | 'MANUAL',
             status: 'PENDING',
-            periodStart: earliest,
-            periodEnd: latest,
+            periodStart: new Date(Math.min(...dates)),
+            periodEnd: new Date(Math.max(...dates)),
+            idempotencyKey: opts.idempotencyKey ?? null,
           },
         });
 
-        await tx.commission.updateMany({
+        const claimed = await tx.commission.updateMany({
           where: {
             id: { in: approved.map((c) => c.id) },
             affiliateId,
             status: 'APPROVED',
           },
           data: { status: 'INCLUDED_IN_PAYOUT', payoutId: payout.id },
+        });
+
+        // Under the advisory lock this should be impossible. Checking anyway
+        // means that if the lock is ever removed or a path bypasses it, the
+        // transaction rolls back instead of creating a payout for money it
+        // does not own.
+        if (claimed.count !== approved.length) {
+          throw Errors.conflict(
+            'Commissions changed while the payout was being created'
+          );
+        }
+
+        await tx.payoutEvent.create({
+          data: {
+            payoutId: payout.id,
+            fromStatus: 'PENDING',
+            toStatus: 'PENDING',
+            actorId: affiliateId,
+            reason: `Requested by affiliate (${claimed.count} commissions)`,
+          },
         });
 
         return toPayoutResponse(payout);

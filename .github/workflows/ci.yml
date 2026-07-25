@@ -71,11 +71,25 @@ jobs:
       - name: Apply migrations
         run: npm run db:deploy --workspace=apps/api
 
+      # The integration suite truncates every table between tests, so it gets
+      # its own database rather than sharing with anything else in the job.
+      - name: Create the integration test database
+        run: |
+          PGPASSWORD=affiliate_pass createdb \
+            -h localhost -U affiliate_user affiliate_integration
+
       - name: Typecheck
         run: npm run typecheck
 
       - name: Unit tests
         run: npm run test
+
+      # Runs against the service containers above, in its own database so a
+      # truncating test suite can never touch anything else.
+      - name: Integration tests
+        run: npm run test:integration
+        env:
+          TEST_DATABASE_URL: postgresql://affiliate_user:affiliate_pass@localhost:5432/affiliate_integration
 
       - name: Build
         run: npm run build

@@ -2,17 +2,61 @@ import type { FastifyInstance } from 'fastify';
 import { reportConversionSchema, reviewConversionSchema } from '@affiliate/shared';
 import { conversionService } from '../services/conversion.service';
 import { requireAuth, requireRole, type AuthedRequest } from '../lib/auth';
+import { requirePostbackSignature, type RawBodyRequest } from '../lib/postback-auth';
+import { env } from '../config/env';
 
 export async function conversionRoutes(app: FastifyInstance) {
   const svc = conversionService();
 
-  // Server-to-server endpoint called by the brand's storefront
-  app.post('/conversions/:campaignId', async (req, reply) => {
-    const { campaignId } = req.params as { campaignId: string };
-    const input = reportConversionSchema.parse(req.body);
-    const result = await svc.report(campaignId, input);
-    reply.code(201);
-    return result;
+  /**
+   * Server-to-server endpoint called by the brand's storefront.
+   *
+   * Registered in its own encapsulated plugin scope so the raw-body parser and
+   * the relaxed rate limit apply here and nowhere else. Fastify scopes content
+   * type parsers to the plugin that registers them, which is what makes this
+   * safe without changing how the rest of the API parses JSON.
+   */
+  await app.register(async (scope) => {
+    // The HMAC covers the bytes exactly as sent. Fastify's default parser
+    // hands us an object, and re-serialising it would reorder keys and drop
+    // whitespace, so the signature could never match. Keep the string, then
+    // parse it ourselves.
+    scope.addContentTypeParser(
+      'application/json',
+      { parseAs: 'string' },
+      (req, body, done) => {
+        (req as RawBodyRequest).rawBody = body as string;
+        try {
+          done(null, JSON.parse(body as string));
+        } catch (err) {
+          done(err as Error, undefined);
+        }
+      }
+    );
+
+    scope.post<{ Params: { campaignId: string } }>(
+      '/conversions/:campaignId',
+      {
+        preHandler: [requirePostbackSignature()],
+        config: {
+          rateLimit: {
+            max: env.POSTBACK_RATE_LIMIT_PER_MINUTE,
+            timeWindow: '1 minute',
+            // Keyed per credential rather than per IP: one brand's spike must
+            // not throttle another's, and storefronts commonly share egress
+            // IPs behind a NAT or a serverless platform.
+            keyGenerator: (req) => String(req.headers['x-affiliate-key'] ?? req.ip),
+          },
+        },
+      },
+      async (req, reply) => {
+        const { campaignId } = req.params;
+        const input = reportConversionSchema.parse(req.body);
+        const result = await svc.report(campaignId, input);
+        reply.code(201);
+        return result;
+      }
+    );
   });
 
   app.get(
@@ -20,7 +64,7 @@ export async function conversionRoutes(app: FastifyInstance) {
     { preHandler: [requireAuth, requireRole('BRAND')] },
     async (req) => {
       const user = (req as AuthedRequest).user;
-      const q = req.query as any;
+      const q = req.query as { status?: string; page?: string; pageSize?: string };
       return svc.listForBrand(user.id, {
         status: q.status,
         page: Number(q.page ?? 1),

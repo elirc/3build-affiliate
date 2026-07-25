@@ -112,6 +112,7 @@ model Campaign {
   conversions    Conversion[]
   commissions    Commission[]
   creativeAssets CreativeAsset[]
+  apiKeys        CampaignApiKey[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -132,6 +133,34 @@ enum AttributionModel {
   FIRST_CLICK
   LAST_CLICK
   LINEAR
+}
+
+// ============ CAMPAIGN API KEYS ============
+
+/// Credentials a brand's storefront uses to sign conversion postbacks.
+///
+/// Scoped to a campaign rather than a brand so that a key leaked from one
+/// integration cannot report sales against every other programme the brand
+/// runs.
+///
+/// The secret is *encrypted*, not hashed. Verifying an HMAC signature means
+/// recomputing it, which requires the original bytes -- a hash would make
+/// verification impossible. See lib/secret-box.ts for the trade-off that
+/// implies.
+model CampaignApiKey {
+  id         String    @id @default(cuid())
+  campaignId String
+  campaign   Campaign  @relation(fields: [campaignId], references: [id])
+
+  keyId           String @unique
+  secretEncrypted String
+  label           String
+
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([campaignId])
 }
 
 // ============ TRACKING LINKS ============

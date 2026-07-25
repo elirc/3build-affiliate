@@ -1,14 +1,17 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  createApiKeySchema,
   createCampaignSchema,
   listCampaignsQuerySchema,
   updateCampaignSchema,
 } from '@affiliate/shared';
 import { campaignService } from '../services/campaign.service';
+import { apiKeyService } from '../services/api-key.service';
 import { requireAuth, requireRole, type AuthedRequest } from '../lib/auth';
 
 export async function campaignRoutes(app: FastifyInstance) {
   const svc = campaignService();
+  const apiKeys = apiKeyService();
 
   app.get(
     '/brand/campaigns',
@@ -50,6 +53,44 @@ export async function campaignRoutes(app: FastifyInstance) {
       const input = updateCampaignSchema.parse(req.body);
       const user = (req as AuthedRequest).user;
       return svc.update(user.id, id, input);
+    }
+  );
+
+  // ---- Postback credentials -------------------------------------------
+  // Keys live under their campaign because that is what they authorise.
+
+  app.get(
+    '/brand/campaigns/:id/api-keys',
+    { preHandler: [requireAuth, requireRole('BRAND')] },
+    async (req) => {
+      const { id } = req.params as { id: string };
+      const user = (req as AuthedRequest).user;
+      return apiKeys.list(user.id, id);
+    }
+  );
+
+  app.post(
+    '/brand/campaigns/:id/api-keys',
+    { preHandler: [requireAuth, requireRole('BRAND')] },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const { label } = createApiKeySchema.parse(req.body);
+      const user = (req as AuthedRequest).user;
+      const created = await apiKeys.create(user.id, id, label);
+      reply.code(201);
+      // The only response that ever contains `secret`. Callers must store it
+      // now; there is no endpoint that will show it again.
+      return created;
+    }
+  );
+
+  app.delete(
+    '/brand/campaigns/:id/api-keys/:keyId',
+    { preHandler: [requireAuth, requireRole('BRAND')] },
+    async (req) => {
+      const { id, keyId } = req.params as { id: string; keyId: string };
+      const user = (req as AuthedRequest).user;
+      return apiKeys.revoke(user.id, id, keyId);
     }
   );
 

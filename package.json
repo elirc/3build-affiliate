@@ -12,10 +12,13 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "db:up": "docker-compose up -d",
-    "db:down": "docker-compose down",
-    "db:migrate": "npm run db:migrate --workspace=apps/api",
-    "db:studio": "npm run db:studio --workspace=apps/api"
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:migrate": "prisma migrate dev --schema apps/api/prisma/schema.prisma",
+    "db:deploy": "prisma migrate deploy --schema apps/api/prisma/schema.prisma",
+    "db:generate": "prisma generate --schema apps/api/prisma/schema.prisma",
+    "db:studio": "prisma studio --schema apps/api/prisma/schema.prisma",
+    "db:seed": "npm run db:seed --workspace=apps/api"
   },
   "devDependencies": {
     "turbo": "^2.0.0",

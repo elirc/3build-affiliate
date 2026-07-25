@@ -1,5 +1,6 @@
 export * from './constants/defaults';
 export * from './constants/roles';
+export * from './constants/notifications';
 export * from './types/user';
 export * from './types/campaign';
 export * from './types/commission';

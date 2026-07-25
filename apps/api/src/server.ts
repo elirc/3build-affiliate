@@ -19,8 +19,10 @@ import { internalRoutes } from './routes/internal.routes';
 import { creativeRoutes } from './routes/creative.routes';
 import { profileRoutes } from './routes/profile.routes';
 import { exportRoutes } from './routes/export.routes';
+import { notificationRoutes } from './routes/notification.routes';
 import { startClickEventWorker } from './workers/click-event.worker';
 import { startLockExpiryWorker } from './workers/lock-expiry.worker';
+import { startNotificationWorker } from './workers/notification.worker';
 
 export interface BuildOptions {
   /**
@@ -72,6 +74,7 @@ export async function build(options: BuildOptions = {}) {
   await app.register(creativeRoutes, { prefix: '/api' });
   await app.register(profileRoutes, { prefix: '/api' });
   await app.register(exportRoutes, { prefix: '/api' });
+  await app.register(notificationRoutes, { prefix: '/api' });
 
   // No /api prefix: these are service-to-service, and keeping them on a
   // distinct path lets a proxy refuse them from the public internet.
@@ -87,6 +90,7 @@ async function main() {
   if (!env.DISABLE_WORKERS) {
     startClickEventWorker();
     startLockExpiryWorker();
+    startNotificationWorker();
   }
 }
 

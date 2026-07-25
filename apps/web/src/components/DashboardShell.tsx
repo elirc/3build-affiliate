@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/store';
+import { NotificationBell } from './NotificationBell';
 
 interface NavItem {
   href: string;
@@ -52,6 +53,9 @@ export function DashboardShell({
             );
           })}
         </nav>
+        <div className="mt-6">
+          <NotificationBell />
+        </div>
         <button
           onClick={logout}
           className="mt-8 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"

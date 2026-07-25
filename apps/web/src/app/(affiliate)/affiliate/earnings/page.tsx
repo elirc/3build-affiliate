@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { DashboardShell } from '@/components/DashboardShell';
 import { AFFILIATE_NAV } from '@/components/nav';
 import { api } from '@/lib/api';
+import { ExportButton } from '@/components/ExportButton';
 
 interface Summary {
   pending: string;
@@ -27,7 +28,10 @@ export default function EarningsPage() {
 
   return (
     <DashboardShell title="Affiliate" nav={AFFILIATE_NAV}>
-      <h1 className="text-2xl font-semibold">Earnings</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Earnings</h1>
+        <ExportButton endpoint="/api/affiliate/commissions/export" label="Export commissions" />
+      </div>
       <div className="mt-6 overflow-hidden rounded-lg border bg-white">
         <table className="min-w-full divide-y">
           <tbody className="divide-y">

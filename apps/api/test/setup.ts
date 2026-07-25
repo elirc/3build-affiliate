@@ -13,6 +13,7 @@ import { redis } from '../src/config/redis';
 const TABLES = [
   'FraudReview',
   'Commission',
+  'Subscription',
   'Conversion',
   'ClickEvent',
   'TrackingLink',

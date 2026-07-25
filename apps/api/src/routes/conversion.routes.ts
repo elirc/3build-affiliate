@@ -1,16 +1,19 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  recurringBillingSchema,
   reportConversionSchema,
   reverseConversionSchema,
   reviewConversionSchema,
 } from '@affiliate/shared';
 import { conversionService } from '../services/conversion.service';
+import { subscriptionService } from '../services/subscription.service';
 import { requireAuth, requireRole, type AuthedRequest } from '../lib/auth';
 import { requirePostbackSignature, type RawBodyRequest } from '../lib/postback-auth';
 import { env } from '../config/env';
 
 export async function conversionRoutes(app: FastifyInstance) {
   const svc = conversionService();
+  const subscriptions = subscriptionService();
 
   /**
    * Server-to-server endpoint called by the brand's storefront.
@@ -59,6 +62,28 @@ export async function conversionRoutes(app: FastifyInstance) {
         const result = await svc.report(campaignId, input);
         reply.code(201);
         return result;
+      }
+    );
+
+    // Renewals are signed exactly like first sales -- they create commissions,
+    // so they need the same authentication.
+    scope.post<{ Params: { campaignId: string } }>(
+      '/conversions/:campaignId/recurring',
+      { preHandler: [requirePostbackSignature()] },
+      async (req) => {
+        const input = recurringBillingSchema.parse(req.body);
+        return subscriptions.recordBillingPeriod(req.params.campaignId, input);
+      }
+    );
+
+    scope.post<{ Params: { campaignId: string } }>(
+      '/conversions/:campaignId/recurring/cancel',
+      { preHandler: [requirePostbackSignature()] },
+      async (req) => {
+        const { externalReference } = recurringBillingSchema
+          .pick({ externalReference: true })
+          .parse(req.body);
+        return subscriptions.cancel(req.params.campaignId, externalReference);
       }
     );
   });

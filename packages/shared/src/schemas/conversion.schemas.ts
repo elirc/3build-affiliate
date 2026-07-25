@@ -29,6 +29,17 @@ export const reverseConversionSchema = z.object({
   refundAmount: z.number().positive().optional(),
 });
 
+export const recurringBillingSchema = z.object({
+  /**
+   * The id of the *original* order, so a brand does not have to store one of
+   * our identifiers to report a renewal.
+   */
+  externalReference: z.string().min(1).max(200),
+  amount: z.number().positive(),
+  occurredAt: z.string().datetime().optional(),
+});
+
+export type RecurringBillingInput = z.infer<typeof recurringBillingSchema>;
 export type ReportConversionInput = z.infer<typeof reportConversionSchema>;
 export type ReviewConversionInput = z.infer<typeof reviewConversionSchema>;
 export type ReverseConversionInput = z.infer<typeof reverseConversionSchema>;

@@ -1,4 +1,4 @@
-import { afterAll, beforeEach } from 'vitest';
+import { beforeEach } from 'vitest';
 import { prisma } from '../src/config/prisma';
 import { redis } from '../src/config/redis';
 
@@ -52,7 +52,15 @@ beforeEach(async () => {
   await redis.flushdb();
 });
 
-afterAll(async () => {
-  await prisma.$disconnect();
-  redis.disconnect();
-});
+/**
+ * Deliberately no `afterAll` disconnect here.
+ *
+ * `setupFiles` runs once per *test file*, so an `afterAll` registered here
+ * fires after every file -- tearing down the Prisma and Redis clients while
+ * the remaining files still need them. The symptom was a suite that passed
+ * file-by-file and failed as a whole, with foreign key violations in setup
+ * where the parent row had been written on a connection that was closed
+ * underneath it.
+ *
+ * Connections are closed once, for the whole run, in global-setup.ts.
+ */

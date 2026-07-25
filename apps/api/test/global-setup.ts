@@ -23,6 +23,22 @@ export async function setup() {
 }
 
 /**
+ * Runs once, after every suite.
+ *
+ * The connections belong here rather than in an `afterAll` in setup.ts:
+ * `setupFiles` runs per test file, so an `afterAll` there closes the clients
+ * after the *first* file and leaves the rest of the run using dead
+ * connections. Vitest tears the worker down at the end anyway, so this is
+ * mostly about not leaving a socket open long enough for CI to complain.
+ */
+export async function teardown() {
+  const { prisma } = await import('../src/config/prisma');
+  const { redis } = await import('../src/config/redis');
+  await prisma.$disconnect();
+  redis.disconnect();
+}
+
+/**
  * Derives `<dev database>_test` from DATABASE_URL so the common case needs no
  * extra configuration. CI sets TEST_DATABASE_URL explicitly.
  */

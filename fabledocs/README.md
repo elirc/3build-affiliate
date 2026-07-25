@@ -6,6 +6,7 @@ Engineering documentation for the Affiliate & Referral Marketing Platform.
 | --- | --- |
 | [01-app-overview.md](./01-app-overview.md) | How the app works today: architecture, data model, the two critical request flows, conventions, and an honest list of what's missing. **Read this first.** |
 | [02-user-stories.md](./02-user-stories.md) | 20 detailed user stories for the next phase of work, written to be picked up and implemented one at a time. |
+| [03-postback-integration.md](./03-postback-integration.md) | For a brand's engineers: how to sign and send conversion reports. Written to be shared outside this repo. |
 
 ## Who these are for
 

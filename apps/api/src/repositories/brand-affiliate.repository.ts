@@ -39,6 +39,9 @@ export function brandAffiliateRepository(db: DB) {
             select: { id: true, companyName: true, companyUrl: true, companyLogo: true },
           },
         },
+        // customCommission is returned by default with the model. An affiliate
+        // should be able to see the rate they were given -- a negotiated rate
+        // nobody can see is a support ticket waiting to happen.
       }),
 
     setStatus: (

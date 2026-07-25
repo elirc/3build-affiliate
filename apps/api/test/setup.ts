@@ -19,6 +19,8 @@ const TABLES = [
   'CampaignApiKey',
   'CreativeAsset',
   'BalanceAdjustment',
+  'CommissionOverrideEvent',
+  'PayoutEvent',
   'Payout',
   'Campaign',
   'BrandAffiliate',

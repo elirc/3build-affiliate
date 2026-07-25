@@ -6,3 +6,4 @@ export * from './commission-format';
 export * from './payout-lifecycle';
 export * from './payout-math';
 export * from './refund-math';
+export * from './resolve-commission';

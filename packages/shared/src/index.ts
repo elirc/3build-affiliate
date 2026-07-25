@@ -12,4 +12,5 @@ export * from './schemas/campaign.schemas';
 export * from './schemas/tracking.schemas';
 export * from './schemas/conversion.schemas';
 export * from './schemas/payout.schemas';
+export * from './schemas/api-key.schemas';
 export * from './utils/short-code';

@@ -17,6 +17,7 @@ export const AFFILIATE_NAV: NavItem[] = [
   { href: '/affiliate/dashboard', label: 'Overview' },
   { href: '/affiliate/applications', label: 'My Applications' },
   { href: '/affiliate/links', label: 'Tracking Links' },
+  { href: '/affiliate/creatives', label: 'Creatives' },
   { href: '/affiliate/earnings', label: 'Earnings' },
   { href: '/affiliate/payouts', label: 'Payouts' },
 ];

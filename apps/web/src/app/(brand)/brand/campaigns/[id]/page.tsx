@@ -3,17 +3,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import { DashboardShell } from '@/components/DashboardShell';
+import { BRAND_NAV } from '@/components/nav';
 import { ApiKeyPanel } from '@/components/ApiKeyPanel';
 import { CampaignStatusControls } from '@/components/CampaignStatusControls';
 import { api } from '@/lib/api';
 import type { Campaign } from '@affiliate/shared';
-
-const NAV = [
-  { href: '/brand/dashboard', label: 'Overview' },
-  { href: '/brand/campaigns', label: 'Campaigns' },
-  { href: '/brand/affiliates', label: 'Affiliates' },
-  { href: '/brand/conversions', label: 'Conversions' },
-];
 
 export default function CampaignDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -22,13 +16,13 @@ export default function CampaignDetailPage() {
     queryFn: () => api<Campaign>(`/api/brand/campaigns/${id}`),
   });
 
-  if (isLoading) return <DashboardShell title="Brand" nav={NAV}>Loading…</DashboardShell>;
-  if (!data) return <DashboardShell title="Brand" nav={NAV}>Not found</DashboardShell>;
+  if (isLoading) return <DashboardShell title="Brand" nav={BRAND_NAV}>Loading…</DashboardShell>;
+  if (!data) return <DashboardShell title="Brand" nav={BRAND_NAV}>Not found</DashboardShell>;
 
   const cs = data.commissionStructure;
 
   return (
-    <DashboardShell title="Brand" nav={NAV}>
+    <DashboardShell title="Brand" nav={BRAND_NAV}>
       <div>
         <p className="text-xs uppercase text-gray-500">Campaign</p>
         <h1 className="text-2xl font-semibold">{data.name}</h1>

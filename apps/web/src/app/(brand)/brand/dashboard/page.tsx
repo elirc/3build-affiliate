@@ -3,15 +3,9 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DashboardShell } from '@/components/DashboardShell';
+import { BRAND_NAV } from '@/components/nav';
 import { AnalyticsChart } from '@/components/AnalyticsChart';
 import { api } from '@/lib/api';
-
-const NAV = [
-  { href: '/brand/dashboard', label: 'Overview' },
-  { href: '/brand/campaigns', label: 'Campaigns' },
-  { href: '/brand/affiliates', label: 'Affiliates' },
-  { href: '/brand/conversions', label: 'Conversions' },
-];
 
 interface AnalyticsResponse {
   series: Array<{
@@ -41,7 +35,7 @@ export default function BrandDashboard() {
   });
 
   return (
-    <DashboardShell title="Brand" nav={NAV}>
+    <DashboardShell title="Brand" nav={BRAND_NAV}>
       <h1 className="text-2xl font-semibold">Overview</h1>
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-4">
         <Stat label="Clicks (30d)" value={data?.totals.clicks ?? '—'} />

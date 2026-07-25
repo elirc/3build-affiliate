@@ -2,14 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DashboardShell } from '@/components/DashboardShell';
+import { BRAND_NAV } from '@/components/nav';
 import { api } from '@/lib/api';
-
-const NAV = [
-  { href: '/brand/dashboard', label: 'Overview' },
-  { href: '/brand/campaigns', label: 'Campaigns' },
-  { href: '/brand/affiliates', label: 'Affiliates' },
-  { href: '/brand/conversions', label: 'Conversions' },
-];
 
 interface Relationship {
   id: string;
@@ -42,7 +36,7 @@ export default function BrandAffiliatesPage() {
   });
 
   return (
-    <DashboardShell title="Brand" nav={NAV}>
+    <DashboardShell title="Brand" nav={BRAND_NAV}>
       <h1 className="text-2xl font-semibold">Affiliates</h1>
       <p className="mt-2 text-gray-600">Review applicants and manage approved partners.</p>
       <div className="mt-6 overflow-hidden rounded-lg border bg-white">

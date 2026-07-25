@@ -2,15 +2,8 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { DashboardShell } from '@/components/DashboardShell';
+import { AFFILIATE_NAV } from '@/components/nav';
 import { api } from '@/lib/api';
-
-const NAV = [
-  { href: '/affiliate/dashboard', label: 'Overview' },
-  { href: '/affiliate/applications', label: 'My Applications' },
-  { href: '/affiliate/links', label: 'Tracking Links' },
-  { href: '/affiliate/earnings', label: 'Earnings' },
-  { href: '/affiliate/payouts', label: 'Payouts' },
-];
 
 interface Summary {
   pending: string;
@@ -33,7 +26,7 @@ export default function EarningsPage() {
   ];
 
   return (
-    <DashboardShell title="Affiliate" nav={NAV}>
+    <DashboardShell title="Affiliate" nav={AFFILIATE_NAV}>
       <h1 className="text-2xl font-semibold">Earnings</h1>
       <div className="mt-6 overflow-hidden rounded-lg border bg-white">
         <table className="min-w-full divide-y">

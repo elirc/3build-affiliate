@@ -3,14 +3,8 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DashboardShell } from '@/components/DashboardShell';
+import { BRAND_NAV } from '@/components/nav';
 import { api } from '@/lib/api';
-
-const NAV = [
-  { href: '/brand/dashboard', label: 'Overview' },
-  { href: '/brand/campaigns', label: 'Campaigns' },
-  { href: '/brand/affiliates', label: 'Affiliates' },
-  { href: '/brand/conversions', label: 'Conversions' },
-];
 
 interface Conversion {
   id: string;
@@ -44,7 +38,7 @@ export default function BrandConversionsPage() {
   });
 
   return (
-    <DashboardShell title="Brand" nav={NAV}>
+    <DashboardShell title="Brand" nav={BRAND_NAV}>
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Conversions</h1>
         <div className="flex gap-2 text-sm">

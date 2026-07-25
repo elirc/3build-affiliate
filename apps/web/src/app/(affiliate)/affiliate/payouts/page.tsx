@@ -3,15 +3,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { DashboardShell } from '@/components/DashboardShell';
+import { AFFILIATE_NAV } from '@/components/nav';
 import { api } from '@/lib/api';
-
-const NAV = [
-  { href: '/affiliate/dashboard', label: 'Overview' },
-  { href: '/affiliate/applications', label: 'My Applications' },
-  { href: '/affiliate/links', label: 'Tracking Links' },
-  { href: '/affiliate/earnings', label: 'Earnings' },
-  { href: '/affiliate/payouts', label: 'Payouts' },
-];
 
 interface Summary {
   approved: string;
@@ -42,7 +35,7 @@ export default function PayoutsPage() {
   });
 
   return (
-    <DashboardShell title="Affiliate" nav={NAV}>
+    <DashboardShell title="Affiliate" nav={AFFILIATE_NAV}>
       <h1 className="text-2xl font-semibold">Payouts</h1>
       <div className="mt-6 max-w-xl rounded-lg border bg-white p-5 shadow-sm">
         <div className="text-sm text-gray-600">Available balance</div>

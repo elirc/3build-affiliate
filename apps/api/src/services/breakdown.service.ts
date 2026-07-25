@@ -108,7 +108,8 @@ export function breakdownService() {
           SELECT tl."campaignId" AS cid, COUNT(*) AS n
           FROM "ClickEvent" ce
           JOIN "TrackingLink" tl ON tl.id = ce."trackingLinkId"
-          WHERE ce."timestamp" >= ${start} AND ce."timestamp" <= ${end}
+          WHERE ce."isCounted" = true
+          AND ce."timestamp" >= ${start} AND ce."timestamp" <= ${end}
           GROUP BY 1
         ) clicks ON clicks.cid = c.id
         LEFT JOIN (
@@ -158,6 +159,7 @@ export function breakdownService() {
           JOIN "TrackingLink" tl ON tl.id = ce."trackingLinkId"
           JOIN "Campaign" c ON c.id = tl."campaignId"
           WHERE c."brandId" = ${brandId}
+            AND ce."isCounted" = true
             AND ce."timestamp" >= ${start} AND ce."timestamp" <= ${end}
           GROUP BY 1
         ) clicks ON clicks.aid = u.id
@@ -213,6 +215,7 @@ export function breakdownService() {
           FROM "ClickEvent" ce
           JOIN "TrackingLink" tl ON tl.id = ce."trackingLinkId"
           WHERE tl."affiliateId" = ${affiliateId}
+            AND ce."isCounted" = true
             AND ce."timestamp" >= ${start} AND ce."timestamp" <= ${end}
           GROUP BY 1
         ) clicks ON clicks.cid = c.id
@@ -260,7 +263,8 @@ export function breakdownService() {
         LEFT JOIN (
           SELECT ce."trackingLinkId" AS lid, COUNT(*) AS n
           FROM "ClickEvent" ce
-          WHERE ce."timestamp" >= ${start} AND ce."timestamp" <= ${end}
+          WHERE ce."isCounted" = true
+          AND ce."timestamp" >= ${start} AND ce."timestamp" <= ${end}
           GROUP BY 1
         ) clicks ON clicks.lid = tl.id
         LEFT JOIN (
@@ -307,6 +311,7 @@ export function subIdService() {
         JOIN "TrackingLink" tl ON tl.id = ce."trackingLinkId"
         WHERE tl."affiliateId" = ${affiliateId}
           AND ce."subIds" IS NOT NULL
+          AND ce."isCounted" = true
           AND ce."timestamp" >= ${start} AND ce."timestamp" <= ${end}
         ORDER BY key
         LIMIT 50
@@ -339,6 +344,7 @@ export function subIdService() {
           FROM "ClickEvent" ce
           JOIN "TrackingLink" tl ON tl.id = ce."trackingLinkId"
           WHERE tl."affiliateId" = ${affiliateId}
+            AND ce."isCounted" = true
             AND ce."timestamp" >= ${start} AND ce."timestamp" <= ${end}
             AND ce."subIds"::jsonb ->> ${key} IS NOT NULL
           GROUP BY 1

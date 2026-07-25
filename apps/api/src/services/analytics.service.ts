@@ -30,6 +30,7 @@ export function analyticsService() {
         JOIN "TrackingLink" tl ON tl.id = ce."trackingLinkId"
         JOIN "Campaign" c ON c.id = tl."campaignId"
         WHERE c."brandId" = ${scope.brandId}
+          AND ce."isCounted" = true
           AND ce."timestamp" >= ${start} AND ce."timestamp" <= ${end}
         GROUP BY 1 ORDER BY 1
       `;
@@ -39,6 +40,7 @@ export function analyticsService() {
       FROM "ClickEvent" ce
       JOIN "TrackingLink" tl ON tl.id = ce."trackingLinkId"
       WHERE tl."affiliateId" = ${scope.affiliateId}
+        AND ce."isCounted" = true
         AND ce."timestamp" >= ${start} AND ce."timestamp" <= ${end}
       GROUP BY 1 ORDER BY 1
     `;

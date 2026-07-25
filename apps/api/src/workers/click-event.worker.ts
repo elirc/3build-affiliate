@@ -1,5 +1,10 @@
 import { UAParser } from 'ua-parser-js';
-import { normaliseSubIds } from '@affiliate/analytics';
+import {
+  classifyTraffic,
+  countsAsClick,
+  normaliseSubIds,
+  parseTrafficKind,
+} from '@affiliate/analytics';
 import { prisma } from '../config/prisma';
 import { redis } from '../config/redis';
 import { logger } from '../lib/logger';
@@ -84,7 +89,18 @@ async function flushBatch(events: ClickEventPayload[]) {
 
   await prisma.$transaction(async (tx) => {
     for (const e of events) {
-      linkCounts.set(e.trackingLinkId, (linkCounts.get(e.trackingLinkId) ?? 0) + 1);
+      // Recomputed when the producer did not say, so a payload from an older
+      // redirect deploy -- or from anything else writing to this queue -- is
+      // still classified rather than defaulting to "human".
+      const trafficKind =
+        parseTrafficKind(e.trafficKind) ?? classifyTraffic(e.userAgent);
+      const isCounted = e.isCounted ?? countsAsClick(trafficKind);
+
+      // Only counted clicks move the denormalised counter. The row is written
+      // either way, so the filtered traffic stays visible.
+      if (isCounted) {
+        linkCounts.set(e.trackingLinkId, (linkCounts.get(e.trackingLinkId) ?? 0) + 1);
+      }
       const ua = new UAParser(e.userAgent);
       const dev = ua.getDevice().type ?? 'desktop';
       const browser = ua.getBrowser().name ?? null;
@@ -100,6 +116,8 @@ async function flushBatch(events: ClickEventPayload[]) {
           browser,
           os,
           attributionCookieId: e.cookieId,
+          trafficKind,
+          isCounted,
           // Capped again here, not only at the redirect edge.
           //
           // The edge is where the caps belong for latency reasons, but this

@@ -41,6 +41,10 @@ export interface CachedTrackingLink {
 }
 
 export interface ClickEventPayload {
+  /** Set by the redirect service; see packages/analytics/src/bot-detection.ts. */
+  trafficKind?: string;
+  /** False for bots and for repeat clicks inside the dedup window. */
+  isCounted?: boolean;
   trackingLinkId: string;
   affiliateId: string;
   campaignId: string;

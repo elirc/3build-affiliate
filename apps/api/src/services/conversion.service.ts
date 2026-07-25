@@ -77,6 +77,10 @@ export function conversionService() {
               attributionCookieId: input.attributionCookieId,
               timestamp: { gte: windowStart, lte: occurredAt },
               trackingLink: { campaignId },
+              // A crawler must never earn anyone a commission. Without this, a
+              // bot that happened to touch a link inside the window could be
+              // the click a real sale is attributed to.
+              isCounted: true,
             },
             select: {
               id: true,

@@ -224,12 +224,23 @@ model ClickEvent {
   attributionCookieId String
   subIds              Json?
 
+  /// Traffic that was served but must not be counted.
+  ///
+  /// Rows are still written -- knowing a post was previewed 40 times in Slack
+  /// is useful, and deleting the evidence makes the filtered totals
+  /// unverifiable. They are excluded from counters, analytics and
+  /// attribution instead.
+  trafficKind         String  @default("human")
+  isCounted           Boolean @default(true)
+
   conversions Conversion[]
 
   @@index([trackingLinkId])
   @@index([attributionCookieId])
   @@index([timestamp])
   @@index([ipHash])
+  /// Analytics reads only counted clicks, so the filter belongs in the index.
+  @@index([isCounted, timestamp])
 }
 
 // ============ CONVERSIONS ============

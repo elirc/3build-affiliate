@@ -2,7 +2,13 @@ import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import { Redis } from 'ioredis';
 import crypto from 'node:crypto';
-import { normaliseSubIds } from '@affiliate/analytics';
+import {
+  classifyTraffic,
+  countsAsClick,
+  dedupKey,
+  DEFAULT_DEDUP_WINDOW_SECONDS,
+  normaliseSubIds,
+} from '@affiliate/analytics';
 import { createApiFetchLink, createLinkResolver } from './link-resolver';
 
 const PORT = Number(process.env.REDIRECT_PORT ?? 3002);
@@ -18,6 +24,9 @@ const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN ?? '';
  * while our infrastructure recovers.
  */
 const LOOKUP_TIMEOUT_MS = Number(process.env.LINK_LOOKUP_TIMEOUT_MS ?? 150);
+const DEDUP_WINDOW_SECONDS = Number(
+  process.env.CLICK_DEDUP_WINDOW_SECONDS ?? DEFAULT_DEDUP_WINDOW_SECONDS
+);
 
 const redis = new Redis(REDIS_URL, { maxRetriesPerRequest: null });
 
@@ -79,6 +88,31 @@ async function buildApp() {
       // one lets anyone grow the database a request at a time.
       const { subIds } = normaliseSubIds(request.query ?? {});
 
+      // Bots are redirected exactly like anyone else and simply not counted.
+      // Breaking a link preview would make an affiliate's post look broken in
+      // every chat app, which costs them real traffic.
+      const trafficKind = classifyTraffic(request.headers['user-agent']);
+
+      // SET NX EX: one round trip, and atomic. A GET-then-SET would let two
+      // simultaneous requests both see "not seen" and both count.
+      let isDuplicate = false;
+      if (countsAsClick(trafficKind)) {
+        try {
+          const first = await redis.set(
+            dedupKey(link.id, cookieId),
+            '1',
+            'EX',
+            DEDUP_WINDOW_SECONDS,
+            'NX'
+          );
+          isDuplicate = first === null;
+        } catch {
+          // Redis unavailable. Counting a possible duplicate is better than
+          // dropping a real click, so we fail open.
+          isDuplicate = false;
+        }
+      }
+
       // Fire and forget on purpose: losing a click is better than making a
       // shopper wait on our queue.
       redis
@@ -94,6 +128,8 @@ async function buildApp() {
             userAgent: request.headers['user-agent'] ?? '',
             referrer: (request.headers.referer as string) ?? '',
             subIds,
+            trafficKind,
+            isCounted: countsAsClick(trafficKind) && !isDuplicate,
           })
         )
         .catch(() => {});

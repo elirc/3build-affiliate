@@ -13,4 +13,5 @@ export * from './schemas/tracking.schemas';
 export * from './schemas/conversion.schemas';
 export * from './schemas/payout.schemas';
 export * from './schemas/api-key.schemas';
+export * from './schemas/profile.schemas';
 export * from './utils/short-code';

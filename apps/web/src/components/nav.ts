@@ -20,6 +20,7 @@ export const AFFILIATE_NAV: NavItem[] = [
   { href: '/affiliate/creatives', label: 'Creatives' },
   { href: '/affiliate/earnings', label: 'Earnings' },
   { href: '/affiliate/payouts', label: 'Payouts' },
+  { href: '/affiliate/settings', label: 'Settings' },
 ];
 
 export const BRAND_NAV: NavItem[] = [
@@ -27,6 +28,7 @@ export const BRAND_NAV: NavItem[] = [
   { href: '/brand/campaigns', label: 'Campaigns' },
   { href: '/brand/affiliates', label: 'Affiliates' },
   { href: '/brand/conversions', label: 'Conversions' },
+  { href: '/brand/settings', label: 'Settings' },
 ];
 
 export const ADMIN_NAV: NavItem[] = [

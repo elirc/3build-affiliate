@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { api, tokenStore } from '@/lib/api';
 import { useAuth } from '@/lib/store';
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const params = useSearchParams();
   const setUser = useAuth((s) => s.setUser);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -18,14 +19,22 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      const { accessToken } = await api<{ accessToken: string; refreshToken: string }>(
+      const tokens = await api<{ accessToken: string; refreshToken: string }>(
         '/api/auth/login',
         { method: 'POST', body: JSON.stringify({ email, password }) }
       );
-      tokenStore.set(accessToken);
+      tokenStore.set(tokens);
       const me = await api<{ id: string; role: 'BRAND' | 'AFFILIATE' | 'ADMIN' }>('/api/auth/me');
       setUser({ id: me.id, role: me.role });
-      if (me.role === 'BRAND') router.push('/brand/dashboard');
+
+      // Send them back where they were headed before the session expired.
+      // Only same-origin paths: an open redirect here would let a phishing
+      // link bounce someone off our login page to anywhere.
+      const next = params.get('next');
+      const safeNext = next && next.startsWith('/') && !next.startsWith('//') ? next : null;
+
+      if (safeNext) router.push(safeNext);
+      else if (me.role === 'BRAND') router.push('/brand/dashboard');
       else if (me.role === 'AFFILIATE') router.push('/affiliate/dashboard');
       else router.push('/admin/fraud');
     } catch (err: any) {
@@ -69,5 +78,29 @@ export default function LoginPage() {
         </button>
       </form>
     </main>
+  );
+}
+
+/**
+ * useSearchParams() opts a component into client-side rendering, and Next
+ * refuses to prerender a page that reads it without a Suspense boundary --
+ * during the static pass there are no search params to read, so it has to
+ * know what to render instead.
+ *
+ * This failed only at `next build`: typecheck and tests both passed, because
+ * neither prerenders. Worth remembering that "it compiles and the tests pass"
+ * is not the same as "it builds".
+ */
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="mx-auto max-w-md px-6 py-16">
+          <h1 className="text-2xl font-semibold">Sign in</h1>
+        </main>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }

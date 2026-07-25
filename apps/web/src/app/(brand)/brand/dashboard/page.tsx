@@ -3,15 +3,17 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DashboardShell } from '@/components/DashboardShell';
+import { BRAND_NAV } from '@/components/nav';
 import { AnalyticsChart } from '@/components/AnalyticsChart';
+import { BreakdownTable } from '@/components/BreakdownTable';
+import {
+  DateRangePicker,
+  StatWithDelta,
+  rangeToQuery,
+  useRangeState,
+} from '@/components/DateRangePicker';
+import type { Comparison } from '@affiliate/analytics';
 import { api } from '@/lib/api';
-
-const NAV = [
-  { href: '/brand/dashboard', label: 'Overview' },
-  { href: '/brand/campaigns', label: 'Campaigns' },
-  { href: '/brand/affiliates', label: 'Affiliates' },
-  { href: '/brand/conversions', label: 'Conversions' },
-];
 
 interface AnalyticsResponse {
   series: Array<{
@@ -29,24 +31,51 @@ interface AnalyticsResponse {
     conversionRate: number;
     epc: string;
   };
+  comparison?: {
+    clicks: Comparison;
+    conversions: Comparison;
+    revenue: Comparison;
+    commission: Comparison;
+    series: AnalyticsResponse['series'];
+  };
 }
 
 export default function BrandDashboard() {
   const [metric, setMetric] = useState<'clicks' | 'conversions' | 'revenue' | 'commission'>(
     'revenue'
   );
+  const range = useRangeState();
+  const query = rangeToQuery(range);
+
   const { data } = useQuery({
-    queryKey: ['brand-analytics'],
-    queryFn: () => api<AnalyticsResponse>('/api/brand/analytics?days=30'),
+    queryKey: ['brand-analytics', query],
+    queryFn: () => api<AnalyticsResponse>(`/api/brand/analytics?${query}`),
   });
 
   return (
-    <DashboardShell title="Brand" nav={NAV}>
+    <DashboardShell title="Brand" nav={BRAND_NAV}>
       <h1 className="text-2xl font-semibold">Overview</h1>
+
+      <div className="mt-4">
+        <DateRangePicker />
+      </div>
+
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-4">
-        <Stat label="Clicks (30d)" value={data?.totals.clicks ?? '—'} />
-        <Stat label="Conversions" value={data?.totals.conversions ?? '—'} />
-        <Stat label="Revenue" value={data ? `$${data.totals.revenue}` : '—'} />
+        <StatWithDelta
+          label="Clicks"
+          value={data?.totals.clicks ?? '—'}
+          comparison={data?.comparison?.clicks}
+        />
+        <StatWithDelta
+          label="Conversions"
+          value={data?.totals.conversions ?? '—'}
+          comparison={data?.comparison?.conversions}
+        />
+        <StatWithDelta
+          label="Revenue"
+          value={data ? `${data.totals.revenue}` : '—'}
+          comparison={data?.comparison?.revenue}
+        />
         <Stat label="Conv. rate" value={data ? `${data.totals.conversionRate}%` : '—'} />
       </div>
       <div className="mt-6 flex gap-2 text-sm">
@@ -65,6 +94,19 @@ export default function BrandDashboard() {
       <div className="mt-4">
         {data && <AnalyticsChart series={data.series} metric={metric} />}
       </div>
+
+      <BreakdownTable
+        title="By campaign"
+        endpoint="/api/brand/analytics/campaigns"
+        queryKey="brand-breakdown-campaigns"
+        linkTo={(r) => (r.campaignId ? `/brand/campaigns/${r.campaignId}` : null)}
+      />
+
+      <BreakdownTable
+        title="By affiliate"
+        endpoint="/api/brand/analytics/affiliates"
+        queryKey="brand-breakdown-affiliates"
+      />
     </DashboardShell>
   );
 }

@@ -9,6 +9,30 @@ export function trackingLinkRepository(db: DB) {
     findByShortCode: (shortCode: string) =>
       db.trackingLink.findUnique({ where: { shortCode } }),
 
+    /**
+     * Everything a redirect needs in one query. The campaign is joined for
+     * `cookieLifetimeDays`, which the redirect service needs to set the
+     * attribution cookie's max age.
+     */
+    findByShortCodeForRedirect: (shortCode: string) =>
+      db.trackingLink.findUnique({
+        where: { shortCode },
+        select: {
+          id: true,
+          affiliateId: true,
+          campaignId: true,
+          destinationUrl: true,
+          isActive: true,
+          campaign: {
+            select: {
+              cookieLifetimeDays: true,
+              status: true,
+              landingPageUrl: true,
+            },
+          },
+        },
+      }),
+
     findById: (id: string) => db.trackingLink.findUnique({ where: { id } }),
 
     listByAffiliate: (affiliateId: string) =>

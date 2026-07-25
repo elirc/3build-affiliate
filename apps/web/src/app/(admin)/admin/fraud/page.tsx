@@ -2,12 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DashboardShell } from '@/components/DashboardShell';
+import { ADMIN_NAV } from '@/components/nav';
 import { api } from '@/lib/api';
-
-const NAV = [
-  { href: '/admin/fraud', label: 'Fraud Review' },
-  { href: '/admin/system', label: 'System Health' },
-];
 
 interface FraudReview {
   id: string;
@@ -46,7 +42,7 @@ export default function FraudPage() {
   });
 
   return (
-    <DashboardShell title="Admin" nav={NAV}>
+    <DashboardShell title="Admin" nav={ADMIN_NAV}>
       <h1 className="text-2xl font-semibold">Fraud Review</h1>
       <p className="mt-2 text-gray-600">
         Conversions flagged by the risk-scoring rules. BLOCKING reverses the conversion.

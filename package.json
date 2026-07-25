@@ -11,6 +11,7 @@
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "test": "turbo run test",
+    "test:integration": "npm run test:integration --workspace=apps/api",
     "typecheck": "turbo run typecheck",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",

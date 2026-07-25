@@ -55,8 +55,25 @@ export const createCampaignSchema = z.object({
   isOpen: z.boolean().default(true),
 });
 
-export const updateCampaignSchema = createCampaignSchema.partial().extend({
-  status: z.enum(['DRAFT', 'ACTIVE', 'PAUSED', 'ENDED']).optional(),
+/**
+ * Field edits only. `status` is deliberately absent: state changes go through
+ * POST /brand/campaigns/:id/transition, so there is exactly one code path
+ * where the transition rules are enforced. A PATCH that could also change
+ * status would be a second, unguarded door into the state machine.
+ */
+export const updateCampaignSchema = createCampaignSchema.partial().strict();
+
+/**
+ * null clears the override and restores the campaign default. Distinguishing
+ * "clear it" from "leave it alone" is why this is nullable rather than
+ * optional.
+ */
+export const setCustomCommissionSchema = z.object({
+  commissionStructure: commissionStructureSchema.nullable(),
+});
+
+export const transitionCampaignSchema = z.object({
+  to: z.enum(['DRAFT', 'ACTIVE', 'PAUSED', 'ENDED']),
 });
 
 export const listCampaignsQuerySchema = z.object({
@@ -68,4 +85,6 @@ export const listCampaignsQuerySchema = z.object({
 
 export type CreateCampaignInput = z.infer<typeof createCampaignSchema>;
 export type UpdateCampaignInput = z.infer<typeof updateCampaignSchema>;
+export type TransitionCampaignInput = z.infer<typeof transitionCampaignSchema>;
+export type SetCustomCommissionInput = z.infer<typeof setCustomCommissionSchema>;
 export type ListCampaignsQuery = z.infer<typeof listCampaignsQuerySchema>;

@@ -26,11 +26,11 @@ export default function RegisterPage() {
         form.role === 'BRAND'
           ? form
           : { ...form, companyName: undefined };
-      const { accessToken } = await api<{ accessToken: string; refreshToken: string }>(
+      const tokens = await api<{ accessToken: string; refreshToken: string }>(
         '/api/auth/register',
         { method: 'POST', body: JSON.stringify(body) }
       );
-      tokenStore.set(accessToken);
+      tokenStore.set(tokens);
       router.push(form.role === 'BRAND' ? '/brand/dashboard' : '/affiliate/dashboard');
     } catch (err: any) {
       setError(err.message ?? 'Registration failed');

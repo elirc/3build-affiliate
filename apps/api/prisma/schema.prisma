@@ -30,7 +30,14 @@ model User {
   // Affiliate-specific
   bio                    String?
   socialLinks            Json?
+
+  // Payout details. Which of these is required depends on payoutMethod, which
+  // is enforced by a discriminated union at the boundary rather than by the
+  // database -- a nullable column cannot express "required when method is X".
+  payoutMethod           PayoutMethod?
   stripeConnectAccountId String?
+  paypalEmail            String?
+  manualPayoutDetails    String?
 
   // Relations
   brandCampaigns     Campaign[]
@@ -41,6 +48,11 @@ model User {
   payouts            Payout[]
   conversions        Conversion[]
   fraudReviews       FraudReview[]    @relation("Reviewer")
+  payoutActions      PayoutEvent[]    @relation("PayoutActor")
+  balanceAdjustments BalanceAdjustment[]
+  subscriptions      Subscription[]
+  notifications      Notification[]
+  notificationPrefs  NotificationPreference[]
 
   @@index([email])
   @@index([role])
@@ -70,6 +82,8 @@ model BrandAffiliate {
   approvedAt    DateTime?
   rejectedAt    DateTime?
   deactivatedAt DateTime?
+
+  overrideEvents CommissionOverrideEvent[]
 
   @@unique([brandId, affiliateId])
   @@index([brandId, status])
@@ -112,6 +126,8 @@ model Campaign {
   conversions    Conversion[]
   commissions    Commission[]
   creativeAssets CreativeAsset[]
+  apiKeys        CampaignApiKey[]
+  subscriptions  Subscription[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -132,6 +148,34 @@ enum AttributionModel {
   FIRST_CLICK
   LAST_CLICK
   LINEAR
+}
+
+// ============ CAMPAIGN API KEYS ============
+
+/// Credentials a brand's storefront uses to sign conversion postbacks.
+///
+/// Scoped to a campaign rather than a brand so that a key leaked from one
+/// integration cannot report sales against every other programme the brand
+/// runs.
+///
+/// The secret is *encrypted*, not hashed. Verifying an HMAC signature means
+/// recomputing it, which requires the original bytes -- a hash would make
+/// verification impossible. See lib/secret-box.ts for the trade-off that
+/// implies.
+model CampaignApiKey {
+  id         String    @id @default(cuid())
+  campaignId String
+  campaign   Campaign  @relation(fields: [campaignId], references: [id])
+
+  keyId           String @unique
+  secretEncrypted String
+  label           String
+
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([campaignId])
 }
 
 // ============ TRACKING LINKS ============
@@ -155,6 +199,7 @@ model TrackingLink {
 
   clickEvents ClickEvent[]
   conversions Conversion[]
+  subscriptions Subscription[]
 
   createdAt DateTime @default(now())
 
@@ -181,12 +226,23 @@ model ClickEvent {
   attributionCookieId String
   subIds              Json?
 
+  /// Traffic that was served but must not be counted.
+  ///
+  /// Rows are still written -- knowing a post was previewed 40 times in Slack
+  /// is useful, and deleting the evidence makes the filtered totals
+  /// unverifiable. They are excluded from counters, analytics and
+  /// attribution instead.
+  trafficKind         String  @default("human")
+  isCounted           Boolean @default(true)
+
   conversions Conversion[]
 
   @@index([trackingLinkId])
   @@index([attributionCookieId])
   @@index([timestamp])
   @@index([ipHash])
+  /// Analytics reads only counted clicks, so the filter belongs in the index.
+  @@index([isCounted, timestamp])
 }
 
 // ============ CONVERSIONS ============
@@ -209,6 +265,14 @@ model Conversion {
 
   customerEmailHash   String?
   isFirstTimeCustomer Boolean @default(true)
+
+  /// Sub-IDs copied from the click that earned this conversion.
+  ///
+  /// Denormalised deliberately. The alternative is joining back through
+  /// clickEventId, which is nullable and points at a row that may be pruned
+  /// long before the commission is paid -- so revenue would stop being
+  /// attributable to a placement exactly when someone wants to check it.
+  subIds              Json?
 
   notes            String?
   approvedAt       DateTime?
@@ -292,15 +356,43 @@ model Payout {
   stripeTransferId String?
   failureReason    String?
 
+  /// Client-supplied key for safe retries. Unique per affiliate rather than
+  /// globally: two affiliates independently sending "retry-1" is ordinary,
+  /// and a global constraint would make the second one fail.
+  idempotencyKey   String?
+
   periodStart DateTime
   periodEnd   DateTime
   paidAt      DateTime?
   createdAt   DateTime @default(now())
 
   commissions Commission[]
+  events      PayoutEvent[]
 
+  @@unique([affiliateId, idempotencyKey])
   @@index([affiliateId, status])
   @@index([status])
+}
+
+/// Audit trail for payout state changes.
+///
+/// This is money leaving the platform, so "who moved this and when" must be
+/// answerable months later. The payout row only carries its current state;
+/// without this, a payout that went PENDING -> PROCESSING -> FAILED ->
+/// PROCESSING -> PAID looks identical to one that went straight through.
+model PayoutEvent {
+  id         String       @id @default(cuid())
+  payoutId   String
+  payout     Payout       @relation(fields: [payoutId], references: [id])
+  fromStatus PayoutStatus
+  toStatus   PayoutStatus
+  actorId    String?
+  actor      User?        @relation("PayoutActor", fields: [actorId], references: [id])
+  reason     String?
+  reference  String?
+  createdAt  DateTime     @default(now())
+
+  @@index([payoutId])
 }
 
 enum PayoutStatus {
@@ -315,6 +407,145 @@ enum PayoutMethod {
   STRIPE_CONNECT
   PAYPAL
   MANUAL
+}
+
+/// Audit of per-affiliate commission overrides.
+///
+/// The override itself lives on BrandAffiliate as a single JSON value, so
+/// setting a new one destroys the previous. For something that decides how
+/// much a partner is paid, "what was the rate in March and who changed it" has
+/// to be answerable.
+model CommissionOverrideEvent {
+  id             String   @id @default(cuid())
+  brandAffiliateId String
+  brandAffiliate BrandAffiliate @relation(fields: [brandAffiliateId], references: [id])
+  actorId        String
+  previousValue  Json?
+  newValue       Json?
+  createdAt      DateTime @default(now())
+
+  @@index([brandAffiliateId])
+}
+
+/// A referred customer on a recurring-commission campaign.
+///
+/// Exists because a recurring deal is a promise about the *future*: "30% for
+/// twelve months" cannot be satisfied by the single commission the first sale
+/// produces. The subscription is what remembers how many periods are left and
+/// on what terms.
+model Subscription {
+  id                   String   @id @default(cuid())
+  campaignId           String
+  campaign             Campaign @relation(fields: [campaignId], references: [id])
+  affiliateId          String
+  affiliate            User     @relation(fields: [affiliateId], references: [id])
+  trackingLinkId       String
+  trackingLink         TrackingLink @relation(fields: [trackingLinkId], references: [id])
+
+  originalConversionId String   @unique
+  customerEmailHash    String?
+  externalReference    String
+
+  /// The commission terms as they stood when this subscription started.
+  ///
+  /// Snapshotted rather than read live: a customer who signed up under a 30%
+  /// deal keeps it for their whole term, even if the brand later changes the
+  /// campaign. Reading the campaign each month would let a brand retroactively
+  /// cut a rate they already promised.
+  commissionSnapshot   Json
+
+  totalPeriods         Int
+  completedPeriods     Int      @default(1)
+
+  status               SubscriptionStatus @default(ACTIVE)
+  startedAt            DateTime @default(now())
+  cancelledAt          DateTime?
+
+  @@unique([campaignId, externalReference])
+  @@index([affiliateId, status])
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  COMPLETED
+}
+
+/// Transactional outbox for notifications.
+///
+/// Rows are written in the *same transaction* as the state change that caused
+/// them. If the transaction rolls back, the notification never existed; if it
+/// commits, the notification is guaranteed to exist and a worker will deliver
+/// it. Sending after the commit instead would mean a crash in between loses
+/// the message with no record that anything was owed -- which is exactly the
+/// hole fraud.evaluate still has.
+model Notification {
+  id        String             @id @default(cuid())
+  userId    String
+  user      User               @relation(fields: [userId], references: [id])
+
+  type      String
+  payload   Json
+
+  readAt    DateTime?
+  sentAt    DateTime?
+  attempts  Int                @default(0)
+  lastError String?
+  status    NotificationStatus @default(PENDING)
+
+  createdAt DateTime           @default(now())
+
+  @@index([userId, readAt])
+  @@index([status, createdAt])
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+/// Per-user opt-outs.
+///
+/// Absence means opted in: a user who has never touched their preferences
+/// should still hear that they have been paid.
+model NotificationPreference {
+  id      String  @id @default(cuid())
+  userId  String
+  user    User    @relation(fields: [userId], references: [id])
+  type    String
+  enabled Boolean @default(true)
+
+  @@unique([userId, type])
+}
+
+// ============ BALANCE ADJUSTMENTS ============
+
+/// A correction to an affiliate's balance that is not tied to a commission's
+/// own lifecycle.
+///
+/// Needed because a commission that has already been PAID cannot be clawed
+/// back by changing its status -- the money has left. Instead we record a
+/// negative adjustment, which is netted off the affiliate's next payout. This
+/// is how an accounting system handles a reversal it cannot un-post.
+model BalanceAdjustment {
+  id              String   @id @default(cuid())
+  affiliateId     String
+  affiliate       User     @relation(fields: [affiliateId], references: [id])
+
+  /// Negative for a clawback. Positive is allowed so goodwill credits can use
+  /// the same mechanism.
+  amount          Decimal  @db.Decimal(10, 2)
+  reason          String
+  conversionId    String?
+
+  /// Set once this adjustment has been applied to a payout, so it is netted
+  /// off exactly once.
+  settledPayoutId String?
+
+  createdAt       DateTime @default(now())
+
+  @@index([affiliateId, settledPayoutId])
 }
 
 // ============ CREATIVE ASSETS ============

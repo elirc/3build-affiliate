@@ -48,7 +48,10 @@ jobs:
       JWT_SECRET: ci-jwt-secret-value-long-enough
       JWT_REFRESH_SECRET: ci-refresh-secret-value-long-enough
       IP_SALT: ci-ip-salt
-      INTERNAL_API_TOKEN: ci-internal-token
+      # Both of these are validated for length/shape at boot, so CI needs
+      # values that actually satisfy the schema rather than placeholders.
+      INTERNAL_API_TOKEN: ci-internal-token-long-enough-for-the-schema
+      POSTBACK_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
       NODE_ENV: test
 
     steps:
@@ -71,11 +74,25 @@ jobs:
       - name: Apply migrations
         run: npm run db:deploy --workspace=apps/api
 
+      # The integration suite truncates every table between tests, so it gets
+      # its own database rather than sharing with anything else in the job.
+      - name: Create the integration test database
+        run: |
+          PGPASSWORD=affiliate_pass createdb \
+            -h localhost -U affiliate_user affiliate_integration
+
       - name: Typecheck
         run: npm run typecheck
 
       - name: Unit tests
         run: npm run test
+
+      # Runs against the service containers above, in its own database so a
+      # truncating test suite can never touch anything else.
+      - name: Integration tests
+        run: npm run test:integration
+        env:
+          TEST_DATABASE_URL: postgresql://affiliate_user:affiliate_pass@localhost:5432/affiliate_integration
 
       - name: Build
         run: npm run build

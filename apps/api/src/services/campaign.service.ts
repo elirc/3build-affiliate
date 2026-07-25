@@ -1,5 +1,11 @@
+import { allowedTransitions, canTransition, lockedFieldsIn } from '@affiliate/analytics';
 import { Errors } from '../lib/errors';
-import type { CreateCampaignInput, UpdateCampaignInput, ListCampaignsQuery } from '@affiliate/shared';
+import type {
+  CampaignStatus,
+  CreateCampaignInput,
+  ListCampaignsQuery,
+  UpdateCampaignInput,
+} from '@affiliate/shared';
 import { campaignRepository } from '../repositories/campaign.repository';
 import { prisma } from '../config/prisma';
 
@@ -18,6 +24,13 @@ function toSlug(name: string): string {
 export function campaignService() {
   const repo = campaignRepository(prisma);
 
+  async function loadOwned(brandId: string, id: string) {
+    const campaign = await repo.findById(id);
+    if (!campaign) throw Errors.notFound('Campaign');
+    if (campaign.brandId !== brandId) throw Errors.forbidden();
+    return campaign;
+  }
+
   return {
     async create(brandId: string, input: CreateCampaignInput) {
       return repo.create({
@@ -27,7 +40,7 @@ export function campaignService() {
         slug: toSlug(input.name),
         landingPageUrl: input.landingPageUrl,
         allowedDomains: input.allowedDomains,
-        commissionStructure: input.commissionStructure as any,
+        commissionStructure: input.commissionStructure,
         attributionModel: input.attributionModel,
         attributionWindowDays: input.attributionWindowDays,
         cookieLifetimeDays: input.cookieLifetimeDays,
@@ -39,22 +52,65 @@ export function campaignService() {
     },
 
     async update(brandId: string, id: string, input: UpdateCampaignInput) {
-      const existing = await repo.findById(id);
-      if (!existing) throw Errors.notFound('Campaign');
-      if (existing.brandId !== brandId) throw Errors.forbidden();
+      const existing = await loadOwned(brandId, id);
+
+      // Commercial terms freeze at activation. Affiliates joined on the terms
+      // that were published; changing them afterwards rewrites a deal they
+      // already accepted. A brand who wants different terms launches a
+      // different campaign.
+      if (existing.status !== 'DRAFT') {
+        const locked = lockedFieldsIn(input);
+        if (locked.length > 0) {
+          throw Errors.forbidden(
+            `Cannot change ${locked.join(', ')} after a campaign has been activated. ` +
+              `Create a new campaign instead.`
+          );
+        }
+      }
+
       return repo.update(id, {
         ...input,
-        commissionStructure: input.commissionStructure as any,
+        commissionStructure: input.commissionStructure,
         startDate: input.startDate ? new Date(input.startDate) : undefined,
         endDate: input.endDate ? new Date(input.endDate) : undefined,
       });
     },
 
+    /**
+     * The only way a campaign's status changes.
+     *
+     * Keeping this separate from `update` means the transition rules live in
+     * exactly one place. A PATCH that could also set status would be a second
+     * door into the state machine, and the second door is always the one that
+     * is left unlocked.
+     */
+    async transition(brandId: string, id: string, to: CampaignStatus) {
+      const campaign = await loadOwned(brandId, id);
+      const from = campaign.status;
+
+      if (!canTransition(from, to)) {
+        throw Errors.invalidRequest(
+          'INVALID_TRANSITION',
+          `Cannot move a campaign from ${from} to ${to}`,
+          { from, to, allowed: allowedTransitions(from) }
+        );
+      }
+
+      if (to === 'ACTIVE') {
+        // Activating something already finished would publish a campaign that
+        // is over, and affiliates would build links that can never convert.
+        if (campaign.endDate && campaign.endDate.getTime() <= Date.now()) {
+          throw Errors.badRequest(
+            'Cannot activate a campaign whose end date has already passed'
+          );
+        }
+      }
+
+      return repo.update(id, { status: to });
+    },
+
     async getById(brandId: string, id: string) {
-      const c = await repo.findById(id);
-      if (!c) throw Errors.notFound('Campaign');
-      if (c.brandId !== brandId) throw Errors.forbidden();
-      return c;
+      return loadOwned(brandId, id);
     },
 
     async listForBrand(brandId: string, query: ListCampaignsQuery) {

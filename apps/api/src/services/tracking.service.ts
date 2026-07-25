@@ -1,5 +1,6 @@
+import { acceptsNewAffiliates, formatCommission } from '@affiliate/analytics';
 import { Errors } from '../lib/errors';
-import { generateShortCode, MAX_TRACKING_LINKS_PER_AFFILIATE_PER_CAMPAIGN, type CachedTrackingLink, type CreateTrackingLinkInput } from '@affiliate/shared';
+import { generateShortCode, MAX_TRACKING_LINKS_PER_AFFILIATE_PER_CAMPAIGN, type CachedTrackingLink, type CommissionStructure, type CreateTrackingLinkInput } from '@affiliate/shared';
 import { trackingLinkRepository } from '../repositories/tracking-link.repository';
 import { campaignRepository } from '../repositories/campaign.repository';
 import { relationshipService } from './relationship.service';
@@ -7,7 +8,16 @@ import { prisma } from '../config/prisma';
 import { redis } from '../config/redis';
 
 const CACHE_KEY = (code: string) => `link:${code}`;
-const CACHE_TTL_SECONDS = 3600;
+
+/**
+ * Kept in step with POSITIVE_TTL_SECONDS in the redirect service's resolver.
+ *
+ * This TTL is a backstop, not the correctness mechanism: writes invalidate
+ * explicitly, and a cache miss now falls back to the database via the
+ * internal lookup endpoint. Before that existed, this value was 3600 and a
+ * link silently stopped working an hour after it was created.
+ */
+const CACHE_TTL_SECONDS = 86_400;
 
 export function trackingService() {
   const links = trackingLinkRepository(prisma);
@@ -18,12 +28,27 @@ export function trackingService() {
     await redis.set(CACHE_KEY(code), JSON.stringify(payload), 'EX', CACHE_TTL_SECONDS);
   }
 
+  /**
+   * Drop a cached entry so the next click re-reads from the database.
+   *
+   * Used instead of rewriting the entry when the new value is not already in
+   * hand. Deleting is safe because a miss is now recoverable; before the
+   * resolver existed, deleting a key would have broken the link outright.
+   */
+  async function invalidateLink(code: string) {
+    await redis.del(CACHE_KEY(code));
+  }
+
   return {
     async create(affiliateId: string, input: CreateTrackingLinkInput) {
       const campaign = await campaigns.findById(input.campaignId);
       if (!campaign) throw Errors.notFound('Campaign');
-      if (campaign.status !== 'ACTIVE') {
-        throw Errors.badRequest('Campaign is not active');
+      if (!acceptsNewAffiliates(campaign.status)) {
+        // Naming the actual status matters: "not active" leaves an affiliate
+        // guessing whether to wait (PAUSED) or give up (ENDED).
+        throw Errors.badRequest(
+          `This campaign is ${campaign.status.toLowerCase()} and is not accepting new links`
+        );
       }
 
       await relationships.assertApproved(campaign.brandId, affiliateId);
@@ -76,6 +101,27 @@ export function trackingService() {
       return links.listByAffiliate(affiliateId);
     },
 
+    /**
+     * Campaigns this affiliate can create a link on right now.
+     *
+     * Returns the allowed domains and a formatted commission summary so the
+     * form can tell the affiliate what will be accepted *before* they submit,
+     * rather than after a rejected request.
+     */
+    async listEligibleCampaigns(affiliateId: string) {
+      const eligible = await campaigns.listEligibleForAffiliate(affiliateId);
+      return eligible.map((c) => ({
+        id: c.id,
+        name: c.name,
+        brandName: c.brand.companyName,
+        allowedDomains: c.allowedDomains,
+        landingPageUrl: c.landingPageUrl,
+        commissionSummary: formatCommission(
+          c.commissionStructure as unknown as CommissionStructure
+        ),
+      }));
+    },
+
     async toggleActive(affiliateId: string, linkId: string, isActive: boolean) {
       const link = await links.findById(linkId);
       if (!link) throw Errors.notFound('Tracking link');
@@ -91,8 +137,35 @@ export function trackingService() {
           cookieLifetimeDays: campaign.cookieLifetimeDays,
           isActive,
         });
+      } else {
+        // No campaign to build a full entry from. Drop the stale one rather
+        // than leaving a cached `isActive: true` behind.
+        await invalidateLink(link.shortCode);
       }
       return updated;
+    },
+
+    /**
+     * Authoritative lookup for the redirect service's cache-miss path.
+     *
+     * Deliberately does not consult Redis: the caller has already missed, and
+     * re-reading the cache here would just add a hop. The caller owns writing
+     * the result back.
+     */
+    async resolveForRedirect(shortCode: string): Promise<CachedTrackingLink | null> {
+      const link = await links.findByShortCodeForRedirect(shortCode);
+      if (!link) return null;
+
+      return {
+        id: link.id,
+        affiliateId: link.affiliateId,
+        campaignId: link.campaignId,
+        destinationUrl: link.destinationUrl,
+        cookieLifetimeDays: link.campaign.cookieLifetimeDays,
+        isActive: link.isActive,
+        campaignStatus: link.campaign.status,
+        campaignLandingPageUrl: link.campaign.landingPageUrl,
+      };
     },
   };
 }

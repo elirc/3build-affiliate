@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "echo 'no lint configured'",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
@@ -30,7 +31,8 @@
     "ioredis": "^5.4.1",
     "pino": "^9.0.0",
     "ua-parser-js": "^1.0.37",
-    "zod": "^3.23.0"
+    "zod": "^3.23.0",
+    "@fastify/multipart": "^9.0.3"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

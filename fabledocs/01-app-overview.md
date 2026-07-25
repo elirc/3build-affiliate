@@ -342,12 +342,12 @@ These are *not built*, rather than broken. Each maps to a user story in
 
 | # | Gap | Consequence | Story |
 | --- | --- | --- | --- |
-| 1 | Campaigns are created as `DRAFT` and **no UI can activate them** | A brand can create a campaign and then hit a dead end: it never appears on `/programs`, affiliates can't apply, links can't be created | US-01 |
-| 2 | The affiliate "Tracking Links" page is read-only | `POST /api/affiliate/links` and `PATCH /api/affiliate/links/:id` exist but nothing in the UI calls them | US-02 |
-| 3 | Redis link cache has a **1-hour TTL and no rehydration** | One hour after a link is created, every click on it 302s to `DEFAULT_FALLBACK_URL` and earns nothing. Same after any Redis restart. This is the single most damaging gap | US-03 |
+| 1 | ~~Campaigns are created as `DRAFT` and **no UI can activate them**~~ **FIXED** | Was: a brand could create a campaign and hit a dead end. The detail page now offers only the legal transitions, and the rules live in `packages/analytics/src/campaign-lifecycle.ts` | US-01 ✅ |
+| 2 | ~~The affiliate "Tracking Links" page is read-only~~ **FIXED** | Was: the endpoints existed but nothing in the UI called them. There is now a create form, a copy button and an active/paused toggle | US-02 ✅ |
+| 3 | ~~Redis link cache has a **1-hour TTL and no rehydration**~~ **FIXED** | Was: one hour after a link was created, every click 302'd to `DEFAULT_FALLBACK_URL` and earned nothing. The redirect service now resolves misses via `GET /internal/links/:shortCode` and repopulates the cache — see `apps/redirect/src/link-resolver.ts` | US-03 ✅ |
 | 4 | No route protection, no token refresh in the web app | Any URL renders for a logged-out user (with failing queries); after 15 minutes a logged-in user silently starts getting 401s. `POST /api/auth/refresh` exists but nothing calls it | US-04 |
-| 5 | `POST /api/conversions/:campaignId` is **unauthenticated** | Anyone on the internet can fabricate sales against any campaign | US-05 |
-| 6 | Payouts never leave `PENDING` | No admin route moves a payout to `PAID`, so commissions never reach `PAID` and the affiliate's "Paid lifetime" is permanently `$0.00`. `reviewPayoutSchema` exists in `shared` but is unused. There's also no payout history endpoint | US-06, US-07 |
+| 5 | ~~`POST /api/conversions/:campaignId` is **unauthenticated**~~ **FIXED** | Was: anyone on the internet could fabricate sales against any campaign. Now requires an HMAC signature from a per-campaign API key, with a 5-minute replay window — see [03-postback-integration.md](./03-postback-integration.md) | US-05 ✅ |
+| 6 | ~~Payouts never leave `PENDING`~~ **PARTLY FIXED** (US-06 done, US-07 pending) | Was: no admin route moved a payout to `PAID`, so "Paid lifetime" was permanently `$0.00`. Admin process/complete/fail/cancel routes now exist with a `PayoutEvent` audit trail, plus affiliate payout history. Concurrency hardening is still open | US-06 ✅, US-07 |
 | 7 | No refund/clawback path for an *approved* conversion | `CLAWED_BACK` is only reachable via admin fraud-block | US-08 |
 | 8 | `BrandAffiliate.customCommission` is never read | Per-partner rates are impossible | US-09 |
 | 9 | `CreativeAsset` has a table and no API or UI | Affiliates have no banners to use | US-10 |
@@ -357,22 +357,27 @@ These are *not built*, rather than broken. Each maps to a user story in
 | 13 | Sub-IDs are captured and never surfaced | `ClickEvent.subIds` is written by the worker and read by nothing | US-14 |
 | 14 | No CSV export anywhere | Finance teams live in spreadsheets | US-15 |
 | 15 | Dashboards are hardcoded to 30 days | The API already accepts `?days=` up to 90 | US-16 |
-| 16 | `/admin/system` is in the admin nav but the page doesn't exist | 404 for admins | US-17 |
+| 16 | ~~`/admin/system` is in the admin nav but the page doesn't exist~~ **FIXED** | The page exists, and failed click batches now land in a dead-letter queue instead of being lost | US-17 ✅ |
 | 17 | No bot filtering or click dedup at the edge | A refresh-happy shopper or a crawler inflates click counts and craters EPC | US-18 |
-| 18 | Zero notifications | Nobody is told their application was approved or their payout was sent | US-19 |
-| 19 | No integration tests | 4 unit test files cover pure functions only; nothing exercises a route, the DB, or a worker | US-20 |
+| 18 | ~~Zero notifications~~ **FIXED** | A transactional outbox: rows are written in the same transaction as the state change, so a notification cannot exist for something that did not happen, nor be lost for something that did | US-19 ✅ |
+| 19 | ~~No integration tests~~ **FIXED** | 120 unit tests plus a full integration harness (`npm run test:integration`) running against real Postgres and Redis | US-20 ✅ |
 | 20 | `emailVerified` is set by the seed and never by a flow; no password reset | — | (not scheduled) |
 
 ### Traps that have already bitten people
 
-- **`DISABLE_WORKERS` doesn't work the way it reads.** It's parsed with
-  `z.coerce.boolean()` (`config/env.ts:15`), and `Boolean("false") === true`.
-  Setting `DISABLE_WORKERS=false` in `.env` **disables the workers**. Leave the
-  variable unset, or fix it with a `z.enum(['true','false']).transform(...)`.
-- **There is no `prisma/migrations/` directory.** The first
-  `npm run db:migrate` generates the initial migration. Commit it.
-- **The repo has no commits and no `node_modules`.** `git log` fails on a fresh
-  clone-less checkout; run `npm install` first.
+- ~~**`DISABLE_WORKERS` doesn't work the way it reads.**~~ **FIXED.** It was
+  parsed with `z.coerce.boolean()`, and `Boolean("false") === true`, so
+  `DISABLE_WORKERS=false` *disabled* the workers. Now parsed by
+  `boolFromString` in `config/env-parsers.ts`, which accepts only `"true"` or
+  `"false"` and rejects anything else at boot.
+- ~~**There is no `prisma/migrations/` directory.**~~ **FIXED.** The initial
+  migration is committed. `npm run db:migrate` from the repo root applies it.
+- ~~**Nothing loads `.env`.**~~ **FIXED.** This was never in the original list
+  because it was found while verifying setup: no package depended on `dotenv`
+  and `env.ts` read `process.env` directly, so the documented
+  `cp .env.example .env` did nothing. The dev/start scripts now pass Node's
+  `--env-file-if-exists=../../.env`.
+- **The repo has no `node_modules` on a fresh clone.** Run `npm install` first.
 - **Two different list-response shapes.** `/api/brand/campaigns` returns
   `{ items, total, page, pageSize }`; `/api/brand/conversions`,
   `/api/affiliate/links`, `/api/brand/affiliates` return bare arrays. Check

@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import { DashboardShell } from '@/components/DashboardShell';
+import { ApiKeyPanel } from '@/components/ApiKeyPanel';
 import { api } from '@/lib/api';
 
 const NAV = [
@@ -50,6 +51,8 @@ export default function CampaignDetailPage() {
         />
         <DetailCard label="Open enrollment" value={data.isOpen ? 'Yes' : 'No'} />
       </div>
+
+      <ApiKeyPanel campaignId={id} />
     </DashboardShell>
   );
 }

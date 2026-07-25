@@ -211,7 +211,9 @@ describe('profile and payout settings', () => {
   it('refuses a payout by a method with no details on file', async () => {
     const brand = await makeBrand();
     const campaign = await makeCampaign(brand.id);
-    const affiliate = await makeAffiliate();
+    // Explicitly unpayable: the factory gives affiliates payout details by
+    // default, because that is the ordinary case.
+    const affiliate = await makeAffiliate({ payoutDetails: false });
     await makeRelationship(brand.id, affiliate.id);
     const link = await makeTrackingLink(affiliate.id, campaign.id);
 

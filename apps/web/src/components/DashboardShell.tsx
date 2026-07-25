@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { tokenStore } from '@/lib/api';
+import { useAuth } from '@/lib/store';
 
 interface NavItem {
   href: string;
@@ -21,8 +21,12 @@ export function DashboardShell({
   const path = usePathname();
   const router = useRouter();
 
-  function logout() {
-    tokenStore.set(null);
+  const signOut = useAuth((s) => s.logout);
+
+  async function logout() {
+    // Ends the session server-side (bumping tokenVersion) before clearing
+    // local state, so the access token cannot outlive the click.
+    await signOut();
     router.push('/login');
   }
 

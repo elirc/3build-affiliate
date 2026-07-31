@@ -14,7 +14,8 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
-    "db:seed": "tsx --env-file-if-exists=../../.env prisma/seed.ts"
+    "db:seed": "tsx --env-file-if-exists=../../.env prisma/seed.ts",
+    "seed:bulk": "tsx --env-file-if-exists=../../.env prisma/seed-bulk.ts"
   },
   "dependencies": {
     "@affiliate/analytics": "*",

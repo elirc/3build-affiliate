@@ -159,6 +159,19 @@ export async function replayDeadLetters(limit = 1000): Promise<{ replayed: numbe
   return { replayed };
 }
 
+/**
+ * Deliberately **not** under a scheduler lease, unlike the other two workers.
+ *
+ * The distinction is worth understanding, because "we scaled out, so guard
+ * everything" is the wrong lesson. A lease is needed when a job *reads a set
+ * of rows and then acts on them*: two instances select the same set and both
+ * act. This worker does not do that. It consumes a Redis list with RPOP, which
+ * is atomic -- each event is handed to exactly one consumer, so N instances
+ * simply share the queue and drain it N times faster.
+ *
+ * Putting a lease on it would make the extra instances idle and turn a
+ * horizontally scalable consumer into a single-threaded one.
+ */
 export async function startClickEventWorker() {
   logger.info('Click event worker started');
 

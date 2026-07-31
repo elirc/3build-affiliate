@@ -1,12 +1,14 @@
 import { prisma } from '../config/prisma';
 import { redis } from '../config/redis';
 import { readHeartbeat } from '../lib/heartbeat';
+import { INSTANCE_ID, readLeaseHolder } from '../lib/lease';
 import {
   DLQ_KEY,
   QUEUE_KEY,
   WORKER_NAME as CLICK_WORKER,
 } from '../workers/click-event.worker';
 import { WORKER_NAME as LOCK_WORKER } from '../workers/lock-expiry.worker';
+import { WORKER_NAME as NOTIFICATION_WORKER } from '../workers/notification.worker';
 
 /**
  * Operational health, in one place.
@@ -121,7 +123,10 @@ export function systemService() {
     label: string,
     expectedIntervalMs: number
   ): Promise<Check> {
-    const hb = await readHeartbeat(worker);
+    const [hb, leaseHolder] = await Promise.all([
+      readHeartbeat(worker),
+      readLeaseHolder(worker),
+    ]);
 
     if (!hb) {
       return {
@@ -142,6 +147,21 @@ export function systemService() {
         status: 'degraded',
         value: age,
         detail: `Running but failing: ${String(lastError)}`,
+      };
+    }
+
+    // A worker that keeps reporting "lease held elsewhere" is healthy on this
+    // instance and doing exactly the right thing -- but an operator looking at
+    // one instance needs to be told that, or an idle worker reads as a broken
+    // one.
+    if (hb.detail?.skipped) {
+      return {
+        name: label,
+        status: 'healthy',
+        value: age,
+        detail: `Standby; another instance holds the lease${
+          leaseHolder ? ` (${leaseHolder})` : ''
+        }.`,
       };
     }
 
@@ -204,12 +224,20 @@ export function systemService() {
   }
 
   return {
-    async check(): Promise<{ status: Health; checks: Check[]; cachedFor: number }> {
+    async check(): Promise<{
+      status: Health;
+      checks: Check[];
+      cachedFor: number;
+      /** Which process answered. With more than one instance, "the worker is
+       *  down" is only ever true of the one you happened to reach. */
+      instanceId: string;
+    }> {
       if (cache && Date.now() - cache.at < CACHE_MS) {
         return {
           status: worstOf(cache.value),
           checks: cache.value,
           cachedFor: CACHE_MS - (Date.now() - cache.at),
+          instanceId: INSTANCE_ID,
         };
       }
 
@@ -218,11 +246,31 @@ export function systemService() {
         ...(await redisChecks()),
         await workerCheck(CLICK_WORKER, 'Click worker', 1_000),
         await workerCheck(LOCK_WORKER, 'Lock-expiry worker', 60_000),
+        await workerCheck(NOTIFICATION_WORKER, 'Notification worker', 10_000),
         ...(await domainChecks()),
       ];
 
       cache = { at: Date.now(), value: checks };
-      return { status: worstOf(checks), checks, cachedFor: CACHE_MS };
+      return { status: worstOf(checks), checks, cachedFor: CACHE_MS, instanceId: INSTANCE_ID };
+    },
+
+    /**
+     * Who currently holds each scheduled job.
+     *
+     * Not cached: leadership is the thing you are watching move when you are
+     * debugging why a job stopped, and a stale answer is worse than none.
+     */
+    async leases() {
+      const names = [LOCK_WORKER, NOTIFICATION_WORKER];
+      const holders = await Promise.all(names.map((n) => readLeaseHolder(n)));
+      return {
+        instanceId: INSTANCE_ID,
+        leases: names.map((name, i) => ({
+          name,
+          holder: holders[i],
+          self: holders[i] === INSTANCE_ID,
+        })),
+      };
     },
 
     /** Exposed so a test can start from a known state. */

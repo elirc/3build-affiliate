@@ -25,6 +25,19 @@ export async function adminRoutes(app: FastifyInstance) {
   );
 
   /**
+   * Who is currently leading each scheduled job.
+   *
+   * The question you ask when a job has stopped: is nobody running it, or is
+   * an instance holding the lease and failing quietly? Those look identical
+   * from the outside and need different fixes.
+   */
+  app.get(
+    '/admin/system/leases',
+    { preHandler: [requireAuth, requireRole('ADMIN')] },
+    async () => system.leases()
+  );
+
+  /**
    * Replays failed click events.
    *
    * Manual on purpose. A batch usually fails for a reason that is still true

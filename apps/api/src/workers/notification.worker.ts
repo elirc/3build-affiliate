@@ -1,6 +1,7 @@
 import { notificationService } from '../services/notification.service';
 import { logger } from '../lib/logger';
 import { beat } from '../lib/heartbeat';
+import { withLease } from '../lib/lease';
 
 export const WORKER_NAME = 'notification';
 const TICK_MS = 10_000;
@@ -18,7 +19,24 @@ export async function startNotificationWorker() {
 
   const tick = async () => {
     try {
-      const result = await svc.deliverPending();
+      // Under a lease: `deliverPending` claims a batch of rows and sends them.
+      // Two instances doing that at once claim overlapping batches, and the
+      // user gets every notification twice.
+      //
+      // The TTL is six ticks' worth. Delivery talks to a provider that can be
+      // slow, and a job that outlives its lease is a job with no lock at all --
+      // renewal covers the overrun, but the TTL should not be so tight that
+      // renewal is the only thing standing between us and a split brain.
+      const outcome = await withLease(WORKER_NAME, TICK_MS * 6, () => svc.deliverPending());
+
+      if (!outcome.ran) {
+        // Not an error: another instance is the leader this tick. Still a
+        // beat, because this process is alive and doing the right thing.
+        await beat(WORKER_NAME, TICK_MS, { skipped: 'lease held elsewhere' });
+        return;
+      }
+
+      const result = outcome.value!;
       if (result.sent > 0 || result.failed > 0) {
         logger.info(result, 'Notifications processed');
       }

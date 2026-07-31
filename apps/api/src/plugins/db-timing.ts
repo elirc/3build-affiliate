@@ -48,19 +48,18 @@ export function registerDbTiming(app: FastifyInstance) {
     logger.warn(
       {
         method: req.method,
-        // The route *pattern*, not the URL: `/api/campaigns/:id` aggregates,
-        // `/api/campaigns/clx123` does not.
-        route: req.routeOptions.url ?? req.url,
         statusCode: reply.statusCode,
         dbMs: Math.round(timing.totalMs),
         queries: timing.queries,
         slowestQuery: timing.slowest,
         totalMs: Math.round(reply.elapsedTime),
-        // Fastify's per-request id, which it takes from the `request-id`
-        // header when one is present. BE-08 replaces this with a correlation
-        // id propagated across services; until then this at least ties the
-        // warning to the request's other log lines.
-        correlationId: req.id,
+        // No `correlationId` and no `route` here any more: the logger's
+        // context mixin adds `requestId` and the route *pattern* to every
+        // record. The id it adds is the one propagated across services, unlike
+        // Fastify's `req.id`, which is a per-process counter that means nothing
+        // to the redirect service or to the click worker. Two ids on one line
+        // is worse than one, because it invites grepping the one that does not
+        // join up.
       },
       'Request exceeded its database time budget'
     );

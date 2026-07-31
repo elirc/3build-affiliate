@@ -206,6 +206,24 @@ describe('idempotency middleware', () => {
     expect(await prisma.idempotencyKey.count()).toBe(0);
   });
 
+  it('records which user claimed the key', async () => {
+    // This was silently broken: the plugin read `req.user`, but Fastify runs
+    // instance-level preHandlers *before* a route's own, so `requireAuth` had
+    // not populated it yet and every row was written with userId null.
+    //
+    // Harmless while the unique constraint is (key, endpoint) -- which is
+    // exactly why nothing caught it -- but a dead column that looks meaningful
+    // is a trap for whoever later builds "scope keys per user" on top of it.
+    const { brand, auth } = await brandAuth();
+
+    await createCampaign(auth, 'key-owner', campaignBody());
+
+    const row = await prisma.idempotencyKey.findFirstOrThrow({
+      where: { key: 'key-owner' },
+    });
+    expect(row.userId).toBe(brand.id);
+  });
+
   it('scopes a key to its endpoint', async () => {
     // The same key against a different operation is not a retry of this one.
     const { auth } = await brandAuth();

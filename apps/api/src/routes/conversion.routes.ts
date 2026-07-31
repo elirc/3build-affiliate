@@ -14,8 +14,16 @@ import { z } from 'zod';
 
 const brandConversionsQuerySchema = z.object({
   status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
+  /**
+   * Offset paging. Deprecated, and kept working for one release.
+   *
+   * Breaking the web client in the same change that adds the replacement
+   * would make a correctness fix look like an outage. `cursor` takes
+   * precedence when both are sent.
+   */
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().min(1).max(500).optional(),
 });
 
 export async function conversionRoutes(app: FastifyInstance) {
@@ -110,6 +118,17 @@ export async function conversionRoutes(app: FastifyInstance) {
       // status was passed straight through to the repository and cast to a
       // Prisma enum, so an unknown value became a 500 rather than a 400.
       const q = brandConversionsQuerySchema.parse(req.query);
+
+      // Cursor wins when both are present: a client that has moved over should
+      // not silently fall back to the paging mode this replaces.
+      if (q.cursor || req.headers['x-pagination'] === 'cursor') {
+        return svc.seekForBrand(user.id, {
+          status: q.status,
+          pageSize: q.pageSize,
+          cursor: q.cursor,
+        });
+      }
+
       return svc.listForBrand(user.id, q);
     }
   );

@@ -335,6 +335,12 @@ model Conversion {
   @@index([campaignId, status])
   @@index([trackingLinkId])
   @@index([occurredAt])
+  /// Supports keyset pagination: the columns and their order match the
+  /// ORDER BY exactly, including direction, so the seek is an index scan
+  /// rather than a sort. An index on occurredAt alone is not enough -- the
+  /// tie-breaker has to be in the index or Postgres still has to sort within
+  /// each timestamp.
+  @@index([occurredAt(sort: Desc), id(sort: Desc)])
 }
 
 enum ConversionStatus {

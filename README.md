@@ -86,6 +86,14 @@ docker exec affiliate-postgres createdb -U affiliate_user affiliate_dev_test
 - Conversion reporting is idempotent by campaign and external order ID, and
   requires an HMAC signature — see
   [fabledocs/03-postback-integration.md](./fabledocs/03-postback-integration.md).
+- Outbound webhooks are queued in the same transaction as the state change and
+  drained by `webhook-delivery.worker.ts`: signed with the endpoint's secret,
+  five-second deadline, six jittered attempts, and a per-endpoint circuit
+  breaker so one dead subscriber cannot starve the rest.
+- A webhook url is an address a customer chooses and this server dials, so it
+  is checked for private ranges at registration *and* against the resolved
+  address at delivery. `WEBHOOK_ALLOW_PRIVATE_TARGETS` disables the second
+  check and must stay `false` anywhere the internet can reach.
 - Access tokens are checked against the user's current token version, so logout
   and a password change revoke every outstanding session.
 - Bot and duplicate clicks are recorded but not counted, in totals, analytics,

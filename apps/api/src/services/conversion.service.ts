@@ -25,6 +25,8 @@ import { campaignRepository } from '../repositories/campaign.repository';
 import { fraudService } from './fraud.service';
 import { subscriptionService } from './subscription.service';
 import { enqueueNotification } from './notification.service';
+import { enqueueWebhookEvent } from './webhook.service';
+import { money } from '../lib/money';
 import { prisma } from '../config/prisma';
 
 /**
@@ -312,6 +314,26 @@ export function conversionService() {
           },
         });
 
+        // Same transaction as the approval, for the same reason the
+        // notification is. There is no webhook event for a rejection: a brand
+        // rejected it themselves, so we would be telling them something they
+        // already know.
+        if (status === 'APPROVED') {
+          await enqueueWebhookEvent(tx, {
+            brandId,
+            eventType: 'conversion.approved',
+            payload: {
+              conversionId,
+              campaignId: conv.campaignId,
+              affiliateId: conv.affiliateId,
+              orderId: conv.externalOrderId,
+              conversionValue: money(updated.conversionValue),
+              commissionAmount: money(updated.commissionAmount),
+              approvedAt: updated.approvedAt?.toISOString() ?? null,
+            },
+          });
+        }
+
         return updated;
       });
     },
@@ -455,6 +477,28 @@ export function conversionService() {
             conversionId,
             orderId: conv.externalOrderId,
             clawbackAmount: outcome.clawbackAmount,
+            reason: input.reason,
+          },
+        });
+
+        // Emitted even though the brand asked for the reversal. The request
+        // came from one of their systems; the others -- accounting, a
+        // warehouse, whatever reconciles orders -- have no way to learn about
+        // it except from us.
+        await enqueueWebhookEvent(tx, {
+          brandId,
+          eventType: 'conversion.reversed',
+          payload: {
+            conversionId,
+            campaignId: conv.campaignId,
+            affiliateId: conv.affiliateId,
+            orderId: conv.externalOrderId,
+            isFullRefund: outcome.isFullRefund,
+            // Already two-decimal strings out of `calculateRefund`; money() is
+            // for the Decimals that come back from Prisma.
+            clawbackAmount: outcome.clawbackAmount,
+            remainingValue: outcome.remainingValue,
+            remainingCommission: outcome.remainingCommission,
             reason: input.reason,
           },
         });

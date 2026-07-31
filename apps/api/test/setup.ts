@@ -21,6 +21,10 @@ const TABLES = [
   'RefreshToken',
   'NotificationPreference',
   'Notification',
+  // Before WebhookEndpoint, which is before User: a delivery references an
+  // endpoint, and an endpoint references the brand that registered it.
+  'WebhookDelivery',
+  'WebhookEndpoint',
   'FraudReview',
   'Commission',
   'Subscription',

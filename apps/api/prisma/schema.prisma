@@ -54,6 +54,7 @@ model User {
   notifications      Notification[]
   notificationPrefs  NotificationPreference[]
   refreshTokens      RefreshToken[]
+  webhookEndpoints   WebhookEndpoint[]
 
   @@index([email])
   @@index([role])
@@ -689,4 +690,102 @@ model IdempotencyKey {
 enum IdempotencyStatus {
   IN_PROGRESS
   COMPLETED
+}
+
+// ============ OUTBOUND WEBHOOKS ============
+
+/// A brand's subscription to events on their own account.
+///
+/// The signing secret is sealed rather than hashed, for the same reason a
+/// campaign API key is: we have to produce the HMAC, not merely check one, so
+/// the original bytes have to come back. `secret-box.ts` explains the bargain
+/// that makes.
+model WebhookEndpoint {
+  id      String @id @default(cuid())
+  brandId String
+  brand   User   @relation(fields: [brandId], references: [id])
+
+  url             String
+  secretEncrypted String
+  /// Explicit subscriptions, not "everything". An endpoint written for one
+  /// event type would otherwise start receiving a payload it has never seen
+  /// the moment we ship a new one.
+  eventTypes      String[]
+
+  status         WebhookEndpointStatus @default(ACTIVE)
+  /// Why we stopped sending. A brand whose integration goes quiet needs to be
+  /// able to find out that their own endpoint answered 410.
+  disabledReason String?
+
+  /// Circuit breaker state, in the database rather than in the worker's
+  /// memory. It has to survive a deploy -- a restart that reset every breaker
+  /// would send the whole backlog at a subscriber that is still down, which is
+  /// the behaviour the breaker exists to prevent. It also has to be legible to
+  /// whichever instance holds the delivery lease, which is not necessarily the
+  /// one that tripped it.
+  breakerState        WebhookBreakerState @default(CLOSED)
+  consecutiveFailures Int                 @default(0)
+  breakerOpenedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deliveries WebhookDelivery[]
+
+  @@index([brandId])
+  @@index([status])
+}
+
+enum WebhookEndpointStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum WebhookBreakerState {
+  CLOSED
+  OPEN
+  HALF_OPEN
+}
+
+/// One event owed to one endpoint.
+///
+/// Written in the same transaction as the state change that caused it, like a
+/// Notification and for the same reason: POSTing after the commit means a
+/// crash in between loses the event with no record that anything was owed.
+///
+/// Fanned out to one row per endpoint at write time rather than resolving
+/// subscribers at delivery time, so that a brand editing their subscriptions
+/// afterwards does not retroactively change what was already owed.
+model WebhookDelivery {
+  id         String          @id @default(cuid())
+  endpointId String
+  endpoint   WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  eventType String
+  payload   Json
+
+  status   WebhookDeliveryStatus @default(PENDING)
+  attempts Int                   @default(0)
+
+  /// The last thing that happened, kept apart so a delivery log can say
+  /// "connection refused" and "returned 503" rather than merging both into
+  /// "failed".
+  lastStatusCode Int?
+  lastError      String?
+
+  /// When this becomes eligible again. Also how an open breaker parks a
+  /// delivery it refused to attempt, without spending an attempt on it.
+  nextAttemptAt DateTime  @default(now())
+  deliveredAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([status, nextAttemptAt])
+  @@index([endpointId, createdAt])
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  DELIVERED
+  FAILED
 }

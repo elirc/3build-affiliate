@@ -170,6 +170,34 @@ export async function makeClickEvent(
   });
 }
 
+/**
+ * A webhook endpoint plus the plaintext signing secret.
+ *
+ * Written straight to the database rather than through the route, because the
+ * route refuses a loopback url -- correctly -- and a stub server is on
+ * loopback by definition. The route's own validation is tested separately.
+ */
+export async function makeWebhookEndpoint(
+  brandId: string,
+  overrides: Partial<{ url: string; eventTypes: string[]; status: 'ACTIVE' | 'DISABLED' }> = {}
+) {
+  const secret = `whsec_${crypto.randomBytes(32).toString('hex')}`;
+  const record = await prisma.webhookEndpoint.create({
+    data: {
+      brandId,
+      url: overrides.url ?? 'https://hooks.example.com/affiliate',
+      secretEncrypted: sealSecret(secret, env.POSTBACK_ENCRYPTION_KEY),
+      eventTypes: overrides.eventTypes ?? [
+        'conversion.approved',
+        'conversion.reversed',
+        'payout.completed',
+      ],
+      status: overrides.status ?? 'ACTIVE',
+    },
+  });
+  return { record, secret };
+}
+
 /** A campaign API key plus the plaintext secret, for signing postbacks. */
 export async function makeApiKey(campaignId: string) {
   const keyId = `ak_${crypto.randomBytes(12).toString('hex')}`;

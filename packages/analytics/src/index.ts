@@ -13,3 +13,5 @@ export * from './periods';
 export * from './bot-detection';
 export * from './bisect';
 export * from './token-bucket';
+export * from './backoff';
+export * from './circuit-breaker';

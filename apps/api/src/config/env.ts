@@ -51,6 +51,20 @@ export const envSchema = z.object({
   // Where creative uploads are written. Local disk for now; the ObjectStorage
   // interface in lib/storage.ts is the seam for moving to S3.
   ASSET_STORAGE_PATH: z.string().default("./storage/assets"),
+
+  /**
+   * Lets outbound webhooks reach private addresses.
+   *
+   * Off by default, and it must stay off in any environment reachable from the
+   * internet: a webhook url is an address a stranger chooses and this server
+   * dials, which is the SSRF primitive in its purest form. It exists because
+   * an integration test's stub server is on loopback by definition, and a
+   * suite that cannot exercise the real socket cannot prove the timeout works.
+   *
+   * Registration validates the url regardless of this flag, so turning it on
+   * does not open the API -- only the delivery-time address check relaxes.
+   */
+  WEBHOOK_ALLOW_PRIVATE_TARGETS: boolFromString(false),
 });
 
 export const env = envSchema.parse(process.env);

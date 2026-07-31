@@ -163,3 +163,63 @@ double-pay an affiliate. Use your real order id, not a random value.
 
 Report against a campaign in `DRAFT` or use a test campaign — conversions on a
 live campaign create real commissions that a human then has to reverse.
+
+---
+
+# Webhooks: the same thing, pointed the other way
+
+Instead of polling for what happened to the sales you reported, register an
+endpoint and we will POST to it.
+
+Register one under **Developers → Webhooks**, or:
+
+```http
+POST /api/brand/webhooks
+{ "url": "https://hooks.yourshop.com/affiliate",
+  "eventTypes": ["conversion.approved", "conversion.reversed", "payout.completed"] }
+```
+
+The response contains a `secret` beginning `whsec_`. **It is shown once.** We
+store it encrypted because we have to sign with it, but there is no endpoint
+that will read it back to you.
+
+`https` only, and the host must be a public one. A url that resolves inside a
+private network is rejected when you register it and again every time we
+deliver, because DNS can change in between.
+
+## Verifying a delivery
+
+Each POST carries four headers:
+
+| Header | |
+| --- | --- |
+| `X-Delivery-Id` | Stable across retries. This is your idempotency key. |
+| `X-Event-Type` | `conversion.approved`, `conversion.reversed`, `payout.completed` |
+| `X-Timestamp` | Milliseconds since the epoch |
+| `X-Signature` | `HMAC-SHA256(secret, "<timestamp>.<raw body>")`, lowercase hex |
+
+The signature is computed exactly as in [Signing a request](#signing-a-request)
+above, with your webhook secret in place of the API key secret. The same
+verification code works in both directions. Compare in constant time, and use
+the **raw** body — re-serialising the JSON changes the bytes and the signature
+will not match.
+
+## What we guarantee, and what we do not
+
+**At least once.** If your endpoint accepts a request and then times out, we
+have delivered it and have no way to know that. We will retry, and you will see
+the same event twice. Deduplicate on `X-Delivery-Id` — it is in the body as
+`id` too, for proxies that strip unknown headers.
+
+**Retries.** Any `2xx` is success. Anything else is retried up to six attempts
+over about half a minute, with jitter. After that the delivery is marked failed
+and you can replay it from the delivery log.
+
+**We stop when you tell us to.** Returning `410 Gone` disables the endpoint
+immediately and is not retried — use it when you tear an integration down.
+Anything else that keeps failing trips a circuit breaker: after five
+consecutive failures we stop calling you for a minute, then send a single probe
+before resuming. Your delivery log shows why.
+
+**Five seconds.** Answer within five seconds or we abandon the request and
+treat it as a failure. Acknowledge first, do the work afterwards.

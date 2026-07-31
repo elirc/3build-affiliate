@@ -296,6 +296,46 @@ Two details worth internalising:
   *inside* the transaction, so a tier boundary is evaluated against approved
   sales at the moment of the sale, not at payout time.
 
+### 6.3 An outbound webhook
+
+The mirror image of §6.2: a brand's storefront tells us about a sale, and we
+tell their other systems what became of it.
+
+```text
+Approval / reversal / payout settlement (inside the transaction)
+        │  enqueueWebhookEvent(tx, ...) fans out to every ACTIVE
+        │  WebhookEndpoint of that brand subscribed to the event type
+        ▼
+WebhookDelivery rows (PENDING, nextAttemptAt = now)
+        ▼
+apps/api  webhook-delivery.worker.ts   (every 5s, under a scheduler lease)
+        │  claim up to 50 due deliveries, group by endpoint
+        │  at most 10 endpoints dialled at once; one request per endpoint
+        │  at a time, so the breaker sees each result before the next
+        │  POST, signed with the endpoint's secret, 5s deadline
+        ▼
+2xx        → DELIVERED
+410 Gone   → endpoint DISABLED, its whole backlog FAILED, no retry
+anything   → retry at 1s, 2s, 4s, 8s, 16s with full jitter; FAILED on the
+else         sixth attempt. Five consecutive failures open the endpoint's
+             circuit breaker for 60s, after which one probe is let through.
+```
+
+Three things are worth knowing before changing any of it:
+
+- **The delivery row is the outbox row.** It is written in the same
+  transaction as the state change, exactly like a `Notification`. A crash
+  between commit and POST costs a delay, never an event.
+- **At least once, and we say so.** `X-Delivery-Id` is stable across retries
+  and is in the body as well as the header, because an endpoint that accepts a
+  request and then times out has been delivered to and we cannot know it.
+  Receivers are told to deduplicate on it — BE-02 from the other side.
+- **The SSRF guard runs twice, and the second one is the real one.**
+  Registration rejects private and malformed urls for the brand's benefit;
+  delivery resolves the hostname, checks every address, and then connects to
+  the address it checked. Checking the *name* and connecting by name is the
+  classic hole, because DNS belongs to whoever registered the url.
+
 ---
 
 ## 7. Layering and conventions in the API

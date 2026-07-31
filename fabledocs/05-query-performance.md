@@ -56,10 +56,10 @@ does not exist.
 establish that each row is visible to the current transaction, and it can skip
 that check only for heap pages the visibility map marks all-visible — which
 only `VACUUM` sets. On a freshly bulk-loaded table the map is empty, so a plan
-that says `Index Only Scan` fetches from the heap anyway and reports
-`Heap Fetches: 46573`. The largest single win in this document depends on that
-number being zero, so `seed-bulk.ts` ends with `VACUUM ANALYZE` rather than
-`ANALYZE`.
+that says `Index Only Scan` goes to the heap anyway and reports a
+`Heap Fetches` count in the tens of thousands rather than zero. The largest
+single win in this document is `Heap Fetches: 0`, so `seed-bulk.ts` ends with
+`VACUUM ANALYZE` rather than `ANALYZE`.
 
 ## Summary
 
@@ -136,18 +136,18 @@ index covers the query, and Postgres never touches the table at all.
 ### After
 
 ```text
- GroupAggregate  (actual time=449.289..512.633 rows=31 loops=1)
+ GroupAggregate  (actual time=540.334..586.479 rows=31 loops=1)
    Buffers: shared hit=499
-   ->  Sort  (actual rows=46573 loops=1)
-         ->  Nested Loop  (actual time=0.928..344.098 rows=46573 loops=1)
+   ->  Sort  (actual rows=46568 loops=1)
+         ->  Nested Loop  (actual time=0.720..394.670 rows=46568 loops=1)
                ->  Hash Join  (actual rows=80 loops=1)
                ->  Index Only Scan using "ClickEvent_trackingLinkId_isCounted_timestamp_idx"
-                     on "ClickEvent" ce  (actual time=0.353..1.983 rows=582 loops=80)
+                     on "ClickEvent" ce  (actual time=0.385..2.239 rows=582 loops=80)
                      Index Cond: (("trackingLinkId" = tl.id) AND ("isCounted" = true)
                                   AND ("timestamp" >= (now() - '30 days'::interval))
                                   AND ("timestamp" <= now()))
                      Heap Fetches: 0
- Execution Time: 514.104 ms
+ Execution Time: 588.029 ms
 ```
 
 All four predicates are now `Index Cond` rather than `Filter`, so the index

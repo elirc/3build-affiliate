@@ -22,6 +22,7 @@ import {
 } from '../workers/click-event.worker';
 import { WORKER_NAME as LOCK_WORKER } from '../workers/lock-expiry.worker';
 import { WORKER_NAME as NOTIFICATION_WORKER } from '../workers/notification.worker';
+import { WORKER_NAME as WEBHOOK_WORKER } from '../workers/webhook-delivery.worker';
 import { redis } from '../config/redis';
 
 /**
@@ -126,7 +127,7 @@ function registerCollectors() {
   });
 
   registry.collect('workers', async () => {
-    const workers = [CLICK_WORKER, LOCK_WORKER, NOTIFICATION_WORKER];
+    const workers = [CLICK_WORKER, LOCK_WORKER, NOTIFICATION_WORKER, WEBHOOK_WORKER];
     const beats = await Promise.all(workers.map((w) => readHeartbeat(w)));
     workers.forEach((worker, i) => {
       // Zero rather than omitting the series. `time() - worker_last_run_timestamp

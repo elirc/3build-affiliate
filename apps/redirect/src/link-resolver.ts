@@ -1,4 +1,4 @@
-import type { CachedTrackingLink } from '@affiliate/shared';
+import { REQUEST_ID_HEADER, type CachedTrackingLink } from '@affiliate/shared';
 
 /**
  * Resolving a short code to its destination.
@@ -23,13 +23,20 @@ export interface RedisLike {
  * Resolves to `null` when the code definitively does not exist.
  * Throws when the source could not be reached or was too slow -- the caller
  * must be able to tell "no such link" from "I don't know".
+ *
+ * `requestId` is forwarded to the API so a slow cache miss reads as one
+ * traceable story across two deployables, rather than as two unrelated log
+ * lines that happen to be a few milliseconds apart.
  */
-export type FetchLink = (shortCode: string) => Promise<CachedTrackingLink | null>;
+export type FetchLink = (
+  shortCode: string,
+  requestId?: string
+) => Promise<CachedTrackingLink | null>;
 
 export interface ResolverOptions {
   redis: RedisLike;
   fetchLink: FetchLink;
-  onError?: (err: unknown, shortCode: string) => void;
+  onError?: (err: unknown, shortCode: string, requestId?: string) => void;
 }
 
 /**
@@ -62,7 +69,8 @@ export function createLinkResolver(options: ResolverOptions) {
   const { redis, fetchLink, onError } = options;
 
   return async function resolveLink(
-    shortCode: string
+    shortCode: string,
+    requestId?: string
   ): Promise<CachedTrackingLink | null> {
     let cached: string | null = null;
     try {
@@ -70,7 +78,7 @@ export function createLinkResolver(options: ResolverOptions) {
     } catch (err) {
       // Redis being down must not take the redirect service with it. Fall
       // through to the API rather than failing the request.
-      onError?.(err, shortCode);
+      onError?.(err, shortCode, requestId);
     }
 
     if (cached === NEGATIVE_SENTINEL) return null;
@@ -81,18 +89,18 @@ export function createLinkResolver(options: ResolverOptions) {
       } catch (err) {
         // A corrupt entry should not be permanent. Treat it as a miss and let
         // the fetch below overwrite it.
-        onError?.(err, shortCode);
+        onError?.(err, shortCode, requestId);
       }
     }
 
     let link: CachedTrackingLink | null;
     try {
-      link = await fetchLink(shortCode);
+      link = await fetchLink(shortCode, requestId);
     } catch (err) {
       // Could not reach the API, or it was too slow. We do not know whether
       // the link exists, so we must not cache anything -- caching a guess
       // would turn a blip into a minute of wrong answers.
-      onError?.(err, shortCode);
+      onError?.(err, shortCode, requestId);
       return null;
     }
 
@@ -114,7 +122,7 @@ export function createLinkResolver(options: ResolverOptions) {
       }
     } catch (err) {
       // Failing to repopulate is survivable: the next click just misses again.
-      onError?.(err, shortCode);
+      onError?.(err, shortCode, requestId);
     }
 
     return link;
@@ -133,11 +141,17 @@ export function createApiFetchLink(config: {
   token: string;
   timeoutMs: number;
 }): FetchLink {
-  return async function fetchLink(shortCode) {
+  return async function fetchLink(shortCode, requestId) {
     const res = await fetch(
       `${config.baseUrl}/internal/links/${encodeURIComponent(shortCode)}`,
       {
-        headers: { 'x-internal-token': config.token },
+        headers: {
+          'x-internal-token': config.token,
+          // Already sanitised at the redirect's own edge, so it is safe to put
+          // back on the wire; the API sanitises it again on the way in, since
+          // it cannot know who called it.
+          ...(requestId ? { [REQUEST_ID_HEADER]: requestId } : {}),
+        },
         signal: AbortSignal.timeout(config.timeoutMs),
       }
     );

@@ -45,6 +45,59 @@ const QUEUE_DOWN = 50_000;
 const CACHE_MS = 10_000;
 let cache: { at: number; value: Check[] } | null = null;
 
+/**
+ * A readiness probe sits on the critical path of every deploy and is polled
+ * every few seconds forever. A dependency that cannot answer within a second
+ * cannot serve a real request either, so waiting any longer only delays a
+ * decision that has already been made.
+ */
+const READINESS_TIMEOUT_MS = 1_000;
+
+export interface ReadinessCheck {
+  ok: boolean;
+  ms: number;
+  error?: string;
+}
+
+export interface Readiness {
+  status: 'ok' | 'unready';
+  checks: { database: ReadinessCheck; redis: ReadinessCheck };
+  instanceId: string;
+  timestamp: string;
+}
+
+async function withTimeout<T>(work: Promise<T>, what: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${what} did not answer within ${READINESS_TIMEOUT_MS}ms`)),
+          READINESS_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } finally {
+    // Cleared rather than left to expire: a probe every two seconds would
+    // otherwise hold a couple of thousand dead timers over an hour.
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function timedCheck(
+  what: string,
+  work: () => Promise<unknown>
+): Promise<ReadinessCheck> {
+  const started = Date.now();
+  try {
+    await withTimeout(work(), what);
+    return { ok: true, ms: Date.now() - started };
+  } catch (err) {
+    return { ok: false, ms: Date.now() - started, error: String(err) };
+  }
+}
+
 export function systemService() {
   async function redisChecks(): Promise<Check[]> {
     try {
@@ -241,6 +294,33 @@ export function systemService() {
   }
 
   return {
+    /**
+     * Can this instance serve traffic *right now*?
+     *
+     * Deliberately not the same question as `/health/live`. Liveness asks
+     * whether the process should be restarted; readiness asks whether it
+     * should be sent requests. Answering both from one endpoint means either a
+     * blip in Postgres restarts every pod, or a pod with no database keeps
+     * being handed traffic -- and which of those you get is decided by
+     * whichever probe the endpoint was written for.
+     *
+     * Uncached, unlike `check()`. A cached readiness answer is a load balancer
+     * routing to a dead instance for another ten seconds.
+     */
+    async readiness(): Promise<Readiness> {
+      const [database, redisCheck] = await Promise.all([
+        timedCheck('Postgres', () => prisma.$queryRaw`SELECT 1`),
+        timedCheck('Redis', () => redis.ping()),
+      ]);
+
+      return {
+        status: database.ok && redisCheck.ok ? 'ok' : 'unready',
+        checks: { database, redis: redisCheck },
+        instanceId: INSTANCE_ID,
+        timestamp: new Date().toISOString(),
+      };
+    },
+
     async check(): Promise<{
       status: Health;
       checks: Check[];

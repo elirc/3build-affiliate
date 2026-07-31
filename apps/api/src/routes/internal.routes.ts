@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { trackingService } from '../services/tracking.service';
 import { Errors } from '../lib/errors';
 import { env } from '../config/env';
+import { CONTENT_TYPE, registry } from '../lib/metrics';
 
 /**
  * Service-to-service endpoints. Not for browsers, not for brands, not for
@@ -58,4 +59,23 @@ export async function internalRoutes(app: FastifyInstance) {
       return link;
     }
   );
+
+  /**
+   * Prometheus scrape target.
+   *
+   * On the internal group, behind the same shared token as everything else
+   * here, because the output is a map of the system: which routes exist, how
+   * much traffic each takes, which of them are failing, and how far behind the
+   * click queue is. None of that belongs on the public API, and "nobody knows
+   * the path" is not access control.
+   *
+   * A scrape must be cheap and must not fail: rendering reads counters already
+   * in memory, and the only I/O -- queue depths and heartbeats -- is wrapped
+   * per collector so that Redis being down costs those gauges and nothing else.
+   */
+  app.get('/metrics', async (req, reply) => {
+    requireInternalToken(req);
+
+    return reply.header('content-type', CONTENT_TYPE).send(await registry.render());
+  });
 }

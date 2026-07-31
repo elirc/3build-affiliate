@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_REQUEST_ID_LENGTH } from '../utils/request-id';
 
 /**
  * Validation for messages taken off the click queue.
@@ -38,6 +39,17 @@ export const clickEventPayloadSchema = z.object({
   subIds: z.record(z.string(), z.string()).default({}),
   trafficKind: z.string().max(32).optional(),
   isCounted: z.boolean().optional(),
+
+  /**
+   * The correlation id of the redirect request that produced this click.
+   *
+   * Bounded but deliberately *not* pattern-checked here. A message whose
+   * correlation id is unusable is still a real click and someone is owed money
+   * for it -- rejecting the whole event over a debugging aid would be a worse
+   * bug than the one the id exists to help diagnose. The consumer sanitises it
+   * and drops it if it cannot be trusted; see the worker.
+   */
+  requestId: z.string().max(MAX_REQUEST_ID_LENGTH).optional(),
 });
 
 export type ClickEventPayloadInput = z.infer<typeof clickEventPayloadSchema>;

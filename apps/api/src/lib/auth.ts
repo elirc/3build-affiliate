@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { UserRole } from '@affiliate/shared';
 import { Errors } from './errors';
 import { prisma } from '../config/prisma';
+import { updateContext } from './request-context';
 
 export interface AuthedRequest extends FastifyRequest {
   user: {
@@ -63,6 +64,12 @@ export async function requireAuth(req: FastifyRequest, _reply: FastifyReply) {
   if (liveFamilyTokens === 0) throw Errors.unauthorized('Session ended');
 
   (req as AuthedRequest).user = { ...user, familyId: tokenUser.familyId };
+
+  // Here rather than in a hook, because this is the first point at which the
+  // identity has actually been *verified*. A hook running before the guard
+  // could only read an unverified claim, and a log line that says "user X did
+  // this" has to mean it.
+  updateContext({ userId: user.id });
 }
 
 export function requireRole(...roles: UserRole[]) {

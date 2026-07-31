@@ -284,6 +284,20 @@ model ClickEvent {
   trafficKind         String  @default("human")
   isCounted           Boolean @default(true)
 
+  /// The correlation id of the redirect request that produced this click.
+  ///
+  /// This is what turns "we think the click was lost" into a query. The id is
+  /// generated at the redirect edge, travels on the queue payload, and is
+  /// written here by the worker, so one grep spans three deployables and ends
+  /// at a row.
+  ///
+  /// Deliberately not indexed. This is the largest table in the system and an
+  /// index on a high-cardinality column costs on every insert, on the hottest
+  /// write path we have, to serve a lookup that happens a handful of times a
+  /// month. The lookup is always bounded by a time window anyway ("it was slow
+  /// at 14:03"), and the existing timestamp index carries that.
+  requestId           String?
+
   conversions Conversion[]
 
   /// The index every analytics aggregate uses, in the order it uses it.

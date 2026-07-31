@@ -39,10 +39,21 @@ async function scenario() {
   };
 }
 
+/**
+ * Pushes what the redirect service pushes.
+ *
+ * `affiliateId` and `campaignId` are required by `clickEventPayloadSchema`
+ * even though `flushBatch` reads neither: an event without them is
+ * dead-lettered before it reaches Postgres. That is BE-03's behaviour working
+ * as intended -- it is why the first run of this suite wrote no rows at all --
+ * and not something to route around here.
+ */
 function queue(payload: Record<string, unknown>) {
   return redis.lpush(
     QUEUE_KEY,
     JSON.stringify({
+      affiliateId: 'aff-1',
+      campaignId: 'camp-1',
       timestamp: Date.now() - 60_000,
       ip: 'hashed-ip',
       userAgent: CHROME,

@@ -25,6 +25,9 @@ const TABLES = [
   // endpoint, and an endpoint references the brand that registered it.
   'WebhookDelivery',
   'WebhookEndpoint',
+  // Errors before the job that owns them, and both before Campaign.
+  'ImportJobError',
+  'ImportJob',
   'FraudReview',
   'Commission',
   'Subscription',

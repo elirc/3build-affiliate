@@ -1,6 +1,7 @@
 import { prisma } from '../config/prisma';
 import { logger } from '../lib/logger';
 import { beat } from '../lib/heartbeat';
+import { cleanupRefreshTokens } from '../services/auth.service';
 
 export const WORKER_NAME = 'lock-expiry';
 const TICK_MS = 60_000;
@@ -66,6 +67,17 @@ export async function startLockExpiryWorker() {
       if (promoted > 0) {
         logger.info({ count: promoted }, 'Commissions promoted LOCKED → APPROVED');
       }
+
+      // Riding on this worker's tick rather than starting a fourth timer.
+      // Every instance already runs every worker (BE-07), so each new
+      // `setInterval` is another job multiplied by the instance count. This
+      // one is idempotent -- deleting an already-deleted row is a no-op -- so
+      // running it twice is harmless while that is still true.
+      const { deleted } = await cleanupRefreshTokens();
+      if (deleted > 0) {
+        logger.info({ count: deleted }, 'Expired refresh tokens swept');
+      }
+
       await beat(WORKER_NAME, TICK_MS, { lastPromoted: promoted });
     } catch (err) {
       logger.error({ err }, 'Lock-expiry tick failed');

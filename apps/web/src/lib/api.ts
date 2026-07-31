@@ -24,6 +24,12 @@ let accessToken: string | null = null;
  * The exposure while it stays here: any XSS on this origin can read a 30-day
  * refresh token rather than only a 15-minute access token. Written down rather
  * than glossed over, and it is the next thing to fix in this area.
+ *
+ * Rotation (BE-01) does not remove that exposure, but it does change its
+ * shape. A stolen token is now single-use, so the theft either stops working
+ * as soon as this client refreshes, or -- if the attacker gets there first --
+ * announces itself when we present the token they already spent. It is
+ * detection, not prevention.
  */
 const ACCESS_KEY = 'accessToken';
 const REFRESH_KEY = 'refreshToken';
@@ -58,6 +64,11 @@ export const tokenStore = {
  * starts its own refresh, and they race: the API issues a new token per call,
  * and whichever finishes last wins while the others hold tokens nobody is
  * using.
+ *
+ * Since BE-01 this is no longer only an efficiency concern. Refresh tokens
+ * rotate, so parallel refreshes would send the *same* token several times;
+ * one succeeds and the rest are refused. Single-flighting is what keeps this
+ * client from logging itself out on every dashboard load.
  */
 let refreshInFlight: Promise<string | null> | null = null;
 

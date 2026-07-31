@@ -235,8 +235,14 @@ describe('end to end: click to payout', () => {
 
     await app.inject({ method: 'POST', url: '/api/auth/logout', headers: auth });
 
-    // tokenVersion was bumped, so the token that worked a moment ago is dead.
-    // This is the whole point of the tokenVersion column.
+    // The token that worked a moment ago is dead.
+    //
+    // The assertion is unchanged, but the mechanism behind it is not: logout
+    // used to bump tokenVersion, which ended *every* session the user had.
+    // It now revokes only this session's token family, and requireAuth checks
+    // that family -- so logging out is still immediate without signing the
+    // user out of their other devices. `logout-all` is what bumps
+    // tokenVersion now.
     const afterLogout = await app.inject({
       method: 'GET',
       url: '/api/auth/me',

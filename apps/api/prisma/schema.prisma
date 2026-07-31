@@ -53,9 +53,53 @@ model User {
   subscriptions      Subscription[]
   notifications      Notification[]
   notificationPrefs  NotificationPreference[]
+  refreshTokens      RefreshToken[]
 
   @@index([email])
   @@index([role])
+}
+
+/// One issued refresh token.
+///
+/// Refresh tokens used to be purely stateless: signed, carrying a
+/// `tokenVersion`, and never recorded. That made them impossible to revoke
+/// individually (the only lever bumped `tokenVersion`, killing every session
+/// the user had) and impossible to *detect* -- a stolen token worked until it
+/// expired and left no trace at all.
+///
+/// Recording them costs a row and a lookup per refresh. What it buys is
+/// rotation and reuse detection, neither of which a stateless token can
+/// express.
+model RefreshToken {
+  id     String @id @default(cuid())
+  /// Every token minted from one login shares a family. Rotation moves the
+  /// family forward; detection revokes the whole family at once, because when
+  /// a token is presented twice you cannot tell which holder is the attacker.
+  familyId String
+  /// SHA-256 of the token, never the token itself. A leaked database of
+  /// hashes is useless; a leaked database of raw tokens is a set of live
+  /// sessions. Unique so a duplicate insert fails loudly instead of quietly
+  /// creating a second row for one token.
+  tokenHash String @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  issuedAt   DateTime  @default(now())
+  lastUsedAt DateTime  @default(now())
+  expiresAt  DateTime
+  /// Set when this token mints its successor. A token presented *after* this
+  /// is set has been used twice, which is the signal the whole design exists
+  /// to produce.
+  rotatedAt DateTime?
+  revokedAt DateTime?
+
+  userAgent String?
+  ipHash    String?
+
+  @@index([familyId])
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
 }
 
 enum UserRole {

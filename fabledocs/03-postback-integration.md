@@ -135,7 +135,7 @@ that look like a signing bug.
 | `401` | Signature, key, or timestamp rejected. | Check the checklist below. Do not retry unchanged. |
 | `409` | This `externalOrderId` was already reported for this campaign. | Nothing — you are safe to retry, this is the idempotency guard working. |
 | `422` | No attributable clicks in the window. | Expected for organic orders. Log and move on. |
-| `429` | Rate limited. | Back off and retry. |
+| `429` | Rate limited. | Wait `Retry-After` seconds and retry. See below. |
 
 **A `401` is deliberately vague.** It never says whether the campaign, the key,
 or the signature was the problem, because that would let anyone enumerate
@@ -152,6 +152,32 @@ the message.
 5. Is the key revoked? Check the Developers tab.
 6. Is the key for **this** campaign?
 7. Is your server clock accurate?
+
+## Rate limits
+
+The budget is **per API key**, not per IP address. Your limit is yours: another
+brand's traffic cannot spend it, and you cannot spend theirs. Sharing an egress
+IP with anyone else — a NAT, a serverless platform — makes no difference.
+
+- **100 requests per minute**, sustained.
+- **Bursts of up to 200** are fine. The allowance refills continuously at the
+  sustained rate rather than resetting on a clock boundary, so there is no
+  benefit to waiting for the top of the minute.
+
+Every response carries the state of your budget:
+
+| Header | Meaning |
+| --- | --- |
+| `X-RateLimit-Limit` | The burst size: the most you can send at once from a full allowance. |
+| `X-RateLimit-Remaining` | Requests you can send right now. |
+| `X-RateLimit-Reset` | Seconds until the allowance is completely full again. |
+| `Retry-After` | On a `429` only: seconds until the next request will be accepted. |
+
+Honour `Retry-After`. Retrying sooner cannot succeed, and a client that
+ignores it spends its refill on rejections.
+
+If you need a higher limit for a migration or a launch, ask before the event
+rather than during it.
 
 ## Idempotency
 

@@ -75,6 +75,11 @@ export const envSchema = z.object({
    * feeling instant.
    */
   SLOW_REQUEST_DB_MS: z.coerce.number().int().min(1).default(200),
+
+  // Where an uploaded conversion CSV is spooled while it waits for a worker.
+  // Local disk, which means the API and the import worker have to share a
+  // filesystem -- see the note at the top of import.worker.ts.
+  IMPORT_STORAGE_PATH: z.string().default("./storage/imports"),
 });
 
 export const env = envSchema.parse(process.env);

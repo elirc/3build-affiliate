@@ -174,6 +174,7 @@ model Campaign {
   creativeAssets CreativeAsset[]
   apiKeys        CampaignApiKey[]
   subscriptions  Subscription[]
+  importJobs     ImportJob[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -343,6 +344,15 @@ model Conversion {
   commissionAmount Decimal          @db.Decimal(10, 2)
   status           ConversionStatus @default(PENDING)
 
+  /// How this conversion reached us.
+  ///
+  /// An imported row is historical: it has no click event, no attribution
+  /// window and no fraud signals. Anything reasoning about *how* a sale
+  /// happened needs to tell it apart from a live postback, and inferring it
+  /// from a null clickEventId would be wrong -- a postback with an expired
+  /// click has one of those too.
+  source           ConversionSource @default(POSTBACK)
+
   customerEmailHash   String?
   isFirstTimeCustomer Boolean @default(true)
 
@@ -388,6 +398,11 @@ enum ConversionStatus {
   PENDING
   APPROVED
   REJECTED
+}
+
+enum ConversionSource {
+  POSTBACK
+  IMPORT
 }
 
 // ============ COMMISSIONS ============
@@ -828,4 +843,73 @@ enum WebhookDeliveryStatus {
   PENDING
   DELIVERED
   FAILED
+}
+
+// ============ BULK IMPORT ============
+
+/// One uploaded CSV of historical conversions.
+///
+/// The row exists before any of the file has been parsed, because the upload
+/// returns immediately and the work happens on a worker. Everything a brand
+/// can see while it waits -- and everything an operator needs afterwards to
+/// explain what happened -- is here.
+model ImportJob {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
+
+  status   ImportJobStatus @default(PENDING)
+  filename String
+  sizeBytes Int
+
+  /// Where the upload was spooled. Nulled once the file is deleted, so a row
+  /// with a path still set after the job finished is a leak, not a mystery.
+  sourcePath String?
+
+  totalRows    Int @default(0)
+  importedRows Int @default(0)
+  skippedRows  Int @default(0)
+  failedRows   Int @default(0)
+
+  /// Why the whole job failed -- a missing column, an unreadable file. Distinct
+  /// from per-row errors: this one means nothing was imported and the brand
+  /// must fix the file itself rather than 12 rows of it.
+  errorMessage String?
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  errors ImportJobError[]
+
+  @@index([campaignId, createdAt])
+  @@index([status])
+}
+
+enum ImportJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+/// One rejected row.
+///
+/// `line` is the line in the file the brand uploaded, not the index of the row
+/// among the ones we managed to parse. A report that says "row 812 is invalid"
+/// when the file has a header and three blank lines is a report nobody can act
+/// on.
+model ImportJobError {
+  id    String    @id @default(cuid())
+  jobId String
+  job   ImportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  line    Int
+  /// The column that failed, when one column is to blame. Null for failures
+  /// the database raised about the row as a whole.
+  column  String?
+  message String
+
+  @@index([jobId, line])
 }

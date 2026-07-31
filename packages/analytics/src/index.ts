@@ -15,3 +15,4 @@ export * from './bisect';
 export * from './token-bucket';
 export * from './backoff';
 export * from './circuit-breaker';
+export * from './csv-parse';

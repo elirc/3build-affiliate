@@ -25,6 +25,34 @@ interface ClaimState {
 }
 
 /**
+ * Who is making this request, without depending on `requireAuth`.
+ *
+ * Reading `(req as AuthedRequest).user` here looks obvious and is always
+ * `undefined`. Fastify builds a route's chain as
+ * `instanceHooks.concat(routeHooks)` (`fastify/lib/route.js`), so a
+ * `preHandler` registered on the root instance -- which this one is, so that
+ * child scopes inherit it -- runs *before* the route's own `preHandler`, and
+ * `requireAuth` is a route-level hook. The claim has to be made before the
+ * handler runs, so it cannot simply be moved later.
+ *
+ * So the token is verified directly. Failure is not an error here: an
+ * unauthenticated request is legitimate on the postback endpoint, which
+ * authenticates by HMAC instead. This value is recorded for operators, never
+ * used to authorise anything.
+ */
+async function callerId(req: FastifyRequest): Promise<string | null> {
+  const existing = (req as AuthedRequest).user?.id;
+  if (existing) return existing;
+
+  try {
+    const payload = await req.jwtVerify<{ id?: string }>();
+    return payload.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Makes a mutating endpoint safe to retry.
  *
  * A client that times out cannot tell whether the request was applied. Its
@@ -77,7 +105,7 @@ export function registerIdempotency(app: FastifyInstance) {
     // gets its own namespace and the constraint never fires.
     const endpoint = `${req.method} ${req.routeOptions.url}`;
     const fp = fingerprint(req.body);
-    const userId = (req as AuthedRequest).user?.id ?? null;
+    const userId = await callerId(req);
 
     try {
       // The claim. Insert-and-catch rather than find-then-insert: the unique

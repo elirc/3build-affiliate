@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import {
   createApiKeySchema,
   createCampaignSchema,
@@ -9,6 +10,11 @@ import {
 import { campaignService } from '../services/campaign.service';
 import { apiKeyService } from '../services/api-key.service';
 import { requireAuth, requireRole, type AuthedRequest } from '../lib/auth';
+
+const publicProgramsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+});
 
 export async function campaignRoutes(app: FastifyInstance) {
   const svc = campaignService();
@@ -107,7 +113,10 @@ export async function campaignRoutes(app: FastifyInstance) {
   );
 
   app.get('/public/programs', async (req) => {
-    const { page = 1, pageSize = 20 } = (req.query as any) ?? {};
-    return svc.listOpenPrograms(Number(page), Number(pageSize));
+    // Unauthenticated and therefore the easiest endpoint in the system to
+    // abuse. Number('abc') is NaN, and an unbounded pageSize is a free way to
+    // ask for every campaign in the database.
+    const { page, pageSize } = publicProgramsQuerySchema.parse(req.query);
+    return svc.listOpenPrograms(page, pageSize);
   });
 }

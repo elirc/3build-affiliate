@@ -1,7 +1,13 @@
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { createTrackingLinkSchema } from '@affiliate/shared';
+
 import { trackingService } from '../services/tracking.service';
 import { requireAuth, requireRole, type AuthedRequest } from '../lib/auth';
+
+// A cast is not validation: `{}` would have left isActive undefined and
+// Prisma would have thrown a 500 where a 400 was the honest answer.
+const toggleLinkSchema = z.object({ isActive: z.boolean() });
 
 export async function trackingRoutes(app: FastifyInstance) {
   const svc = trackingService();
@@ -41,7 +47,7 @@ export async function trackingRoutes(app: FastifyInstance) {
     { preHandler: [requireAuth, requireRole('AFFILIATE')] },
     async (req) => {
       const { id } = req.params as { id: string };
-      const { isActive } = req.body as { isActive: boolean };
+      const { isActive } = toggleLinkSchema.parse(req.body);
       const user = (req as AuthedRequest).user;
       return svc.toggleActive(user.id, id, isActive);
     }

@@ -6,6 +6,10 @@ import { Errors } from '../lib/errors';
 import { systemService } from '../services/system.service';
 import { replayDeadLetters } from '../workers/click-event.worker';
 
+const fraudQuerySchema = z.object({
+  decision: z.enum(['PENDING', 'CLEARED', 'FLAGGED', 'BLOCKED']).default('PENDING'),
+});
+
 const decisionSchema = z.object({
   decision: z.enum(['CLEARED', 'FLAGGED', 'BLOCKED']),
   notes: z.string().max(1000).optional(),
@@ -41,9 +45,10 @@ export async function adminRoutes(app: FastifyInstance) {
     '/admin/fraud-reviews',
     { preHandler: [requireAuth, requireRole('ADMIN')] },
     async (req) => {
-      const q = req.query as { decision?: string };
+      // Cast to a Prisma enum before, so an unknown decision was a 500.
+      const { decision } = fraudQuerySchema.parse(req.query);
       return prisma.fraudReview.findMany({
-        where: q.decision ? { decision: q.decision as any } : { decision: 'PENDING' },
+        where: { decision },
         orderBy: { createdAt: 'desc' },
         take: 100,
         include: {

@@ -4,6 +4,10 @@ import { z } from 'zod';
 import { relationshipService } from '../services/relationship.service';
 import { requireAuth, requireRole, type AuthedRequest } from '../lib/auth';
 
+const listAffiliatesQuerySchema = z.object({
+  status: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'DEACTIVATED']).optional(),
+});
+
 const reviewSchema = z.object({
   action: z.enum(['approve', 'reject', 'deactivate']),
 });
@@ -37,7 +41,7 @@ export async function relationshipRoutes(app: FastifyInstance) {
     { preHandler: [requireAuth, requireRole('BRAND')] },
     async (req) => {
       const user = (req as AuthedRequest).user;
-      const { status } = req.query as { status?: string };
+      const { status } = listAffiliatesQuerySchema.parse(req.query);
       return svc.listForBrand(user.id, status);
     }
   );

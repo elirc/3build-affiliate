@@ -10,6 +10,13 @@ import { subscriptionService } from '../services/subscription.service';
 import { requireAuth, requireRole, type AuthedRequest } from '../lib/auth';
 import { requirePostbackSignature, type RawBodyRequest } from '../lib/postback-auth';
 import { env } from '../config/env';
+import { z } from 'zod';
+
+const brandConversionsQuerySchema = z.object({
+  status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
 
 export async function conversionRoutes(app: FastifyInstance) {
   const svc = conversionService();
@@ -93,12 +100,10 @@ export async function conversionRoutes(app: FastifyInstance) {
     { preHandler: [requireAuth, requireRole('BRAND')] },
     async (req) => {
       const user = (req as AuthedRequest).user;
-      const q = req.query as { status?: string; page?: string; pageSize?: string };
-      return svc.listForBrand(user.id, {
-        status: q.status,
-        page: Number(q.page ?? 1),
-        pageSize: Number(q.pageSize ?? 20),
-      });
+      // status was passed straight through to the repository and cast to a
+      // Prisma enum, so an unknown value became a 500 rather than a 400.
+      const q = brandConversionsQuerySchema.parse(req.query);
+      return svc.listForBrand(user.id, q);
     }
   );
 

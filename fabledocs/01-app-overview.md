@@ -3,6 +3,10 @@
 > Audience: an engineer who has never seen this repo. By the end you should be
 > able to trace a click from a browser to a paid commission, and know which file
 > to open for any given change.
+>
+> Sections 1–7 describe how the system works. Section 8 records what was wrong
+> when this codebase was handed over and where each thing was fixed — worth
+> reading, because several of those bugs are the kind that grow back.
 
 ---
 
@@ -335,57 +339,73 @@ brand and another brand's data.
 
 ---
 
-## 8. Known gaps — read before filing a bug
+## 8. What was wrong, and where it was fixed
 
-These are *not built*, rather than broken. Each maps to a user story in
-[02-user-stories.md](./02-user-stories.md).
+Every gap in the original review has been closed. The table is kept — with the
+fix and the commit that made it — because knowing *why* something looks the way
+it does is worth more than a clean slate, and because several of these are the
+sort of bug that grows back.
 
-| # | Gap | Consequence | Story |
+The one exception is at the bottom, still genuinely open.
+
+| # | What was wrong | Why it mattered | Fixed by |
 | --- | --- | --- | --- |
-| 1 | ~~Campaigns are created as `DRAFT` and **no UI can activate them**~~ **FIXED** | Was: a brand could create a campaign and hit a dead end. The detail page now offers only the legal transitions, and the rules live in `packages/analytics/src/campaign-lifecycle.ts` | US-01 ✅ |
-| 2 | ~~The affiliate "Tracking Links" page is read-only~~ **FIXED** | Was: the endpoints existed but nothing in the UI called them. There is now a create form, a copy button and an active/paused toggle | US-02 ✅ |
-| 3 | ~~Redis link cache has a **1-hour TTL and no rehydration**~~ **FIXED** | Was: one hour after a link was created, every click 302'd to `DEFAULT_FALLBACK_URL` and earned nothing. The redirect service now resolves misses via `GET /internal/links/:shortCode` and repopulates the cache — see `apps/redirect/src/link-resolver.ts` | US-03 ✅ |
-| 4 | No route protection, no token refresh in the web app | Any URL renders for a logged-out user (with failing queries); after 15 minutes a logged-in user silently starts getting 401s. `POST /api/auth/refresh` exists but nothing calls it | US-04 |
-| 5 | ~~`POST /api/conversions/:campaignId` is **unauthenticated**~~ **FIXED** | Was: anyone on the internet could fabricate sales against any campaign. Now requires an HMAC signature from a per-campaign API key, with a 5-minute replay window — see [03-postback-integration.md](./03-postback-integration.md) | US-05 ✅ |
-| 6 | ~~Payouts never leave `PENDING`~~ **PARTLY FIXED** (US-06 done, US-07 pending) | Was: no admin route moved a payout to `PAID`, so "Paid lifetime" was permanently `$0.00`. Admin process/complete/fail/cancel routes now exist with a `PayoutEvent` audit trail, plus affiliate payout history. Concurrency hardening is still open | US-06 ✅, US-07 |
-| 7 | No refund/clawback path for an *approved* conversion | `CLAWED_BACK` is only reachable via admin fraud-block | US-08 |
-| 8 | `BrandAffiliate.customCommission` is never read | Per-partner rates are impossible | US-09 |
-| 9 | `CreativeAsset` has a table and no API or UI | Affiliates have no banners to use | US-10 |
-| 10 | `recurring` commissions pay once | `recurringMonths` is stored and ignored (`commission-calc.ts:42`) | US-11 |
-| 11 | No profile/settings page | `bio`, `socialLinks`, `avatarUrl`, `stripeConnectAccountId` are unreachable after signup | US-12 |
-| 12 | Analytics is one global time series per role | `CampaignSummary`/`AffiliateSummary` types exist in `shared` but nothing produces them — no per-campaign or per-affiliate breakdown | US-13 |
-| 13 | Sub-IDs are captured and never surfaced | `ClickEvent.subIds` is written by the worker and read by nothing | US-14 |
-| 14 | No CSV export anywhere | Finance teams live in spreadsheets | US-15 |
-| 15 | Dashboards are hardcoded to 30 days | The API already accepts `?days=` up to 90 | US-16 |
-| 16 | ~~`/admin/system` is in the admin nav but the page doesn't exist~~ **FIXED** | The page exists, and failed click batches now land in a dead-letter queue instead of being lost | US-17 ✅ |
-| 17 | No bot filtering or click dedup at the edge | A refresh-happy shopper or a crawler inflates click counts and craters EPC | US-18 |
-| 18 | ~~Zero notifications~~ **FIXED** | A transactional outbox: rows are written in the same transaction as the state change, so a notification cannot exist for something that did not happen, nor be lost for something that did | US-19 ✅ |
-| 19 | ~~No integration tests~~ **FIXED** | 120 unit tests plus a full integration harness (`npm run test:integration`) running against real Postgres and Redis | US-20 ✅ |
-| 20 | `emailVerified` is set by the seed and never by a flow; no password reset | — | (not scheduled) |
+| 1 | Campaigns were created `DRAFT` and no UI could activate them | A brand could complete the create form and hit a wall: invisible on `/programs`, no applications, no links. The seed hardcodes `ACTIVE`, which is why nobody noticed | US-01 — `packages/analytics/src/campaign-lifecycle.ts` |
+| 2 | The affiliate Tracking Links page was read-only | `POST /affiliate/links` worked; nothing called it. The only way to get a link was curl | US-02 |
+| 3 | Redis link cache had a 1-hour TTL and no rehydration | **The most damaging one.** An hour after creation every click 302'd to the fallback and earned nothing. Silent, total loss | US-03 — `apps/redirect/src/link-resolver.ts` |
+| 4 | No route protection and no token refresh in the web app | After 15 minutes a dashboard silently stopped loading data. Logged-out visitors got the full chrome and failing queries | US-04 — `apps/web/src/lib/api.ts`, `components/RequireRole.tsx` |
+| 5 | `POST /api/conversions/:campaignId` was unauthenticated | Anyone who guessed a campaign id could fabricate sales at any value | US-05 — `apps/api/src/lib/postback-auth.ts` |
+| 6 | Payouts never left `PENDING` | No route transitioned one, so no commission ever reached `PAID` and "Paid lifetime" was structurally `$0.00` | US-06 — `packages/analytics/src/payout-lifecycle.ts` |
+| — | Concurrent payout requests could double-pay | The amount was computed outside the transaction that claimed the commissions. A double-click was enough | US-07 — advisory lock in `payout.service.ts` |
+| 7 | No refund path for an *approved* conversion | `lockPeriodDays` existed to allow refunds; the thing it was holding for was never built | US-08 — `packages/analytics/src/refund-math.ts` |
+| 8 | `BrandAffiliate.customCommission` was never read | Negotiating with a high performer meant running a second campaign for one person | US-09 — `packages/analytics/src/resolve-commission.ts` |
+| 9 | `CreativeAsset` had a table and no API | Affiliates had no on-brand material to promote with | US-10 — `apps/api/src/services/creative.service.ts` |
+| 10 | `recurring` commissions paid once | "30% for 12 months" paid 30% once. `recurringMonths` was stored, validated, displayed — and ignored | US-11 — `apps/api/src/services/subscription.service.ts` |
+| 11 | No profile or settings page | Brands judged applications on a name and an email. An affiliate could request a PayPal payout with no PayPal address anywhere in the system | US-12 |
+| 12 | Analytics was one time series per role | It answered "how are we doing?" and could not answer "which of these is doing it" | US-13 — `apps/api/src/services/breakdown.service.ts` |
+| 13 | Sub-IDs were captured and never surfaced | Collected on every click since the first commit and read by nothing | US-14 — `packages/analytics/src/sub-ids.ts` |
+| 14 | No CSV export | Finance teams reconcile in spreadsheets | US-15 — `apps/api/src/lib/csv.ts` |
+| 15 | Dashboards hardcoded to 30 days | No way to see last week, and no way to tell whether a number was better than before | US-16 — `packages/analytics/src/periods.ts` |
+| 16 | `/admin/system` was in the nav and 404'd | Building it surfaced worse: a failed click batch was **lost**, because events are popped off the queue before the transaction | US-17 — DLQ in `click-event.worker.ts` |
+| 17 | No bot filtering or click dedup | Every crawler and link preview counted. An affiliate whose post was widely *shared* looked worse than one whose was not | US-18 — `packages/analytics/src/bot-detection.ts` |
+| 18 | Zero notifications | Nobody was told their application was approved or their commission reversed | US-19 — transactional outbox in `notification.service.ts` |
+| 19 | No integration tests | Four unit files covering pure functions; nothing exercised a route, the database, or a worker | US-20 — `apps/api/test/` |
+| **20** | **`emailVerified` is set by the seed and never by a flow; no password reset** | **Still open.** Changing an email sets `emailVerified` to false and nothing ever sets it back. There is no way to recover a forgotten password | **Not scheduled** |
 
-### Traps that have already bitten people
+### Found while building, not in the original review
 
-- ~~**`DISABLE_WORKERS` doesn't work the way it reads.**~~ **FIXED.** It was
-  parsed with `z.coerce.boolean()`, and `Boolean("false") === true`, so
-  `DISABLE_WORKERS=false` *disabled* the workers. Now parsed by
-  `boolFromString` in `config/env-parsers.ts`, which accepts only `"true"` or
-  `"false"` and rejects anything else at boot.
-- ~~**There is no `prisma/migrations/` directory.**~~ **FIXED.** The initial
-  migration is committed. `npm run db:migrate` from the repo root applies it.
-- ~~**Nothing loads `.env`.**~~ **FIXED.** This was never in the original list
-  because it was found while verifying setup: no package depended on `dotenv`
-  and `env.ts` read `process.env` directly, so the documented
-  `cp .env.example .env` did nothing. The dev/start scripts now pass Node's
-  `--env-file-if-exists=../../.env`.
-- **The repo has no `node_modules` on a fresh clone.** Run `npm install` first.
-- **Two different list-response shapes.** `/api/brand/campaigns` returns
+These were not in the twenty. Each was caught by CI or by a test rather than by
+reading the code, which is the argument for both.
+
+| What | How it surfaced |
+| --- | --- |
+| **Nothing ever read `.env`** | No `dotenv` dependency anywhere and `env.ts` reads `process.env` directly, so the documented `cp .env.example .env` did nothing. The setup instructions could never have worked |
+| **`DISABLE_WORKERS=false` disabled the workers** | `z.coerce.boolean()` is `Boolean("false")`, which is `true` |
+| **Money had two spellings** | Prisma's `Decimal` serialises `120.00` as `"120"`, while a hand-formatted total gave `"120.00"` — from the same API. Found by a payout test asserting the wrong one |
+| **The sub-ID cap existed only at the edge** | Anything else writing to the click queue bypassed it. Found by a test that pushed straight to Redis |
+| **A test asserted Windows path behaviour** | `..\..\windows` escapes on Windows and is an ordinary filename on Linux. Green locally, red on CI |
+| **The integration suite tore itself down** | `setupFiles` runs per *file*, so an `afterAll` there disconnected Prisma and Redis while sixteen files still needed them. Passed file-by-file, failed as a whole |
+
+### Traps that are still true
+
+- **Two list-response shapes.** `/api/brand/campaigns` returns
   `{ items, total, page, pageSize }`; `/api/brand/conversions`,
-  `/api/affiliate/links`, `/api/brand/affiliates` return bare arrays. Check
+  `/api/affiliate/links` and `/api/brand/affiliates` return bare arrays. Check
   before you destructure.
-- **The dev/prod CORS split** in `server.ts:26` allows *any* origin outside
+- **The dev/prod CORS split** in `server.ts` allows any origin outside
   production. Fine locally, dangerous if `NODE_ENV` is ever wrong.
+- **`fraud.evaluate` still runs after its transaction commits.** A crash
+  between the two leaves a conversion with no fraud review and no record that
+  one was owed. US-19 shows the pattern that fixes it — an outbox row written
+  inside the transaction — and applying it here is the obvious next job.
+- **Refresh tokens are in `localStorage`.** They belong in an httpOnly cookie;
+  the reasoning and the cost are written at the top of `apps/web/src/lib/api.ts`.
+- **Notifications are not actually delivered.** The outbox, worker, retries and
+  preferences all work; the driver logs to the console. A real provider is one
+  class implementing one method.
+- **Uploads go to local disk.** Fine for one instance, wrong for two. The
+  `ObjectStorage` interface in `apps/api/src/lib/storage.ts` is where S3 goes.
 
----
 
 ## 9. Running it
 

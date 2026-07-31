@@ -5,7 +5,12 @@ import {
   calculateRefund,
   resolveCommissionStructure,
 } from '@affiliate/analytics';
-import { commissionStructureSchema } from '@affiliate/shared';
+import {
+  InvalidCursorError,
+  commissionStructureSchema,
+  decodeCursor,
+  toCursorPage,
+} from '@affiliate/shared';
 import { Prisma } from '@prisma/client';
 import { Errors } from '../lib/errors';
 import { hashEmail } from '../lib/hash';
@@ -472,6 +477,42 @@ export function conversionService() {
         skip,
         take: opts.pageSize,
       });
+    },
+
+    /**
+     * Cursor-paged conversions.
+     *
+     * Offset paging over this list is not just slow, it is *wrong*: the order
+     * is `occurredAt desc`, so conversions arriving between two page fetches
+     * shift everything down and rows from page 1 reappear on page 2. A client
+     * paging through everything to sum it gets a wrong number and no error.
+     */
+    async seekForBrand(
+      brandId: string,
+      opts: { status?: string; pageSize: number; cursor?: string }
+    ) {
+      let after: { occurredAt: Date; id: string } | undefined;
+
+      if (opts.cursor) {
+        try {
+          const { sortValue, id } = decodeCursor(opts.cursor);
+          const occurredAt = new Date(sortValue);
+          if (Number.isNaN(occurredAt.getTime())) throw new InvalidCursorError();
+          after = { occurredAt, id };
+        } catch {
+          // A cursor arrives from outside and is therefore untrusted. A
+          // malformed one is the client's mistake to fix, not a 500.
+          throw Errors.invalidRequest('INVALID_CURSOR', 'Cursor is not valid');
+        }
+      }
+
+      const rows = await conversions.seekForBrandReview(brandId, {
+        status: opts.status,
+        take: opts.pageSize,
+        after,
+      });
+
+      return toCursorPage(rows, opts.pageSize, (r) => r.occurredAt);
     },
   };
 }

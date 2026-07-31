@@ -1,5 +1,24 @@
 # Backend stories — BE-01 … BE-10
 
+> **Status: all ten are done and on `main`,** each through its own pull
+> request. This document is kept as the record of what each story was judged
+> against; the reasoning behind each implementation is in the PR that
+> delivered it.
+>
+> Three of them grew in the building, and the PRs say so:
+>
+> - **BE-01** shipped a bug and caught it before merge. The first version
+>   passed all twelve tests while the *logs* showed reuse detection firing
+>   during the concurrency test — four concurrent losers each revoked the
+>   token family, destroying the winner's fresh token. Two browser tabs would
+>   have logged the user out.
+> - **BE-06** did not meet its 100 ms acceptance criterion for two queries and
+>   says so rather than moving the goalposts, along with why a rollup is the
+>   real answer.
+> - **BE-10** needed a fourth required CSV column the story did not
+>   anticipate: `Conversion.trackingLinkId` is `NOT NULL`, and an imported row
+>   has no clicks to resolve it from.
+
 Ten stories chosen for what they *teach*, not for what a user would notice.
 Every one of them is a real gap in this codebase, and several are latent bugs
 that only appear under load, under concurrency, or on the second server —

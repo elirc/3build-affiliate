@@ -11,6 +11,11 @@ import { redis } from '../src/config/redis';
  * about whether tests should reset it.
  */
 const TABLES = [
+  // Sessions must not survive a test. A leftover refresh token from a previous
+  // test is a live credential for a user that no longer exists, and reuse
+  // detection is precisely the kind of feature whose tests would pass or fail
+  // depending on what ran before them.
+  'RefreshToken',
   'NotificationPreference',
   'Notification',
   'FraudReview',

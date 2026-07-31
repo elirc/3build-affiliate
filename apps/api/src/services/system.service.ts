@@ -4,6 +4,8 @@ import { readHeartbeat } from '../lib/heartbeat';
 import { INSTANCE_ID, readLeaseHolder } from '../lib/lease';
 import {
   DLQ_KEY,
+  MAX_ATTEMPTS,
+  PARKED_KEY,
   QUEUE_KEY,
   WORKER_NAME as CLICK_WORKER,
 } from '../workers/click-event.worker';
@@ -46,9 +48,10 @@ let cache: { at: number; value: Check[] } | null = null;
 export function systemService() {
   async function redisChecks(): Promise<Check[]> {
     try {
-      const [queueDepth, dlqDepth] = await Promise.all([
+      const [queueDepth, dlqDepth, parkedDepth] = await Promise.all([
         redis.llen(QUEUE_KEY),
         redis.llen(DLQ_KEY),
+        redis.llen(PARKED_KEY),
       ]);
 
       const queueStatus: Health =
@@ -83,6 +86,20 @@ export function systemService() {
               ? `${dlqDepth} click(s) failed to write and are held for replay. ` +
                 `Fix the cause, then replay them.`
               : 'Empty.',
+        },
+        {
+          name: 'Parked click events',
+          // Parked messages are not an incident in progress -- they have
+          // stopped consuming capacity, which is the point. They are a backlog
+          // of decisions someone owes, so they show as degraded rather than
+          // down and never clear themselves.
+          status: parkedDepth > 0 ? 'degraded' : 'healthy',
+          value: parkedDepth,
+          detail:
+            parkedDepth > 0
+              ? `${parkedDepth} click(s) failed ${MAX_ATTEMPTS} times and will not be ` +
+                `retried. They need a person to look at them.`
+              : 'None.',
         },
       ];
     } catch (err) {

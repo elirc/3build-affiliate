@@ -10,6 +10,7 @@ import { registerIdempotency } from './plugins/idempotency';
 import { registerObservability } from './plugins/observability';
 import { registerRateLimit, type RateLimitOptions } from './plugins/rate-limit';
 import { registerDbTiming } from './plugins/db-timing';
+import { systemService } from './services/system.service';
 import { authRoutes } from './routes/auth.routes';
 import { campaignRoutes } from './routes/campaign.routes';
 import { trackingRoutes } from './routes/tracking.routes';
@@ -86,19 +87,33 @@ export async function build(options: BuildOptions = {}) {
   // are part of what a request costs.
   registerDbTiming(app);
 
-  app.get(
-    '/health',
-    // Never rate limited. Probes come from a handful of load balancer
-    // addresses, so they share a bucket with each other and with anyone else
-    // behind the same hop; throttling one would fail a liveness check and take
-    // the instance out of rotation for a reason that has nothing to do with
-    // its health.
-    { config: { rateLimit: false } },
-    async () => ({
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-    })
-  );
+  /**
+   * Liveness. Deliberately trivial: it answers "should this process be
+   * restarted?", and the answer must not depend on Postgres. A liveness probe
+   * that checks dependencies turns a database blip into a rolling restart of
+   * every instance, which is how a small outage becomes a large one.
+   *
+   * Never rate limited, like the readiness probe below. Probes come from a
+   * handful of load balancer addresses, so they share a bucket with each other
+   * and with anyone else behind the same hop; throttling one would fail a
+   * liveness check and take the instance out of rotation for a reason that has
+   * nothing to do with its health.
+   */
+  app.get('/health/live', { config: { rateLimit: false } }, async () => ({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+  }));
+
+  /**
+   * Readiness. Answers "should this instance be sent traffic?", which needs
+   * the dependencies a request actually uses. 503 rather than 200-with-a-body,
+   * because a load balancer reads the status code and nothing else.
+   */
+  app.get('/health', { config: { rateLimit: false } }, async (_req, reply) => {
+    const readiness = await systemService().readiness();
+    if (readiness.status !== 'ok') reply.code(503);
+    return readiness;
+  });
 
   await app.register(authRoutes, { prefix: '/api/auth' });
   await app.register(campaignRoutes, { prefix: '/api' });

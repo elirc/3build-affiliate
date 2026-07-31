@@ -9,12 +9,13 @@ import {
 import { Errors } from '../lib/errors';
 import { money } from '../lib/money';
 import { MINIMUM_PAYOUT_AMOUNT } from '@affiliate/shared';
-import type { Payout } from '@prisma/client';
+import type { Payout, Prisma, PrismaClient } from '@prisma/client';
 import { commissionRepository } from '../repositories/commission.repository';
 import { payoutRepository } from '../repositories/payout.repository';
 import { profileService } from './profile.service';
 import { prisma } from '../config/prisma';
 import { enqueueNotification } from './notification.service';
+import { enqueueWebhookEvent } from './webhook.service';
 import { env } from '../config/env';
 
 /**
@@ -30,6 +31,53 @@ function toPayoutResponse(payout: Payout) {
     feeAmount: money(payout.feeAmount),
     netAmount: money(payout.netAmount),
   };
+}
+
+/**
+ * Fans a completed payout out to the brands it concerns.
+ *
+ * A payout belongs to an affiliate, not to a brand, and the commissions inside
+ * one can span several brands' campaigns. Sending the whole payout to all of
+ * them would tell each brand what the others had paid the same affiliate;
+ * sending it to none of them leaves a brand unable to reconcile an affiliate's
+ * earnings against their own ledger. So each brand is told about its own share
+ * and nothing else.
+ *
+ * Runs inside the caller's transaction, so the events exist if and only if the
+ * payout actually settled.
+ */
+async function emitPayoutCompleted(
+  tx: Prisma.TransactionClient | PrismaClient,
+  payoutId: string,
+  affiliateId: string,
+  paidAt: Date | null
+) {
+  const paid = await tx.commission.findMany({
+    where: { payoutId },
+    select: { amount: true, campaign: { select: { brandId: true } } },
+  });
+
+  const shares = new Map<string, { count: number; total: number }>();
+  for (const commission of paid) {
+    const share = shares.get(commission.campaign.brandId) ?? { count: 0, total: 0 };
+    share.count += 1;
+    share.total += Number(commission.amount);
+    shares.set(commission.campaign.brandId, share);
+  }
+
+  for (const [brandId, share] of shares) {
+    await enqueueWebhookEvent(tx, {
+      brandId,
+      eventType: 'payout.completed',
+      payload: {
+        payoutId,
+        affiliateId,
+        paidAt: paidAt?.toISOString() ?? null,
+        commissionCount: share.count,
+        amount: money(share.total),
+      },
+    });
+  }
 }
 
 export function payoutService() {
@@ -269,6 +317,10 @@ export function payoutService() {
               reason: opts.reason ?? null,
             },
           });
+        }
+
+        if (to === 'PAID') {
+          await emitPayoutCompleted(tx, payoutId, payout.affiliateId, updated.paidAt);
         }
 
         return toPayoutResponse(updated);

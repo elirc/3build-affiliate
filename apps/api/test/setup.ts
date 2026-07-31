@@ -11,6 +11,9 @@ import { redis } from '../src/config/redis';
  * about whether tests should reset it.
  */
 const TABLES = [
+  // A key held over from a previous test would make the next request with the
+  // same key replay a response for a row that no longer exists.
+  'IdempotencyKey',
   // Sessions must not survive a test. A leftover refresh token from a previous
   // test is a live credential for a user that no longer exists, and reuse
   // detection is precisely the kind of feature whose tests would pass or fail

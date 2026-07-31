@@ -642,3 +642,45 @@ enum FraudDecision {
   FLAGGED
   BLOCKED
 }
+
+// ============ IDEMPOTENCY ============
+
+/// A claimed idempotency key and, once the request finishes, its response.
+///
+/// One endpoint was idempotent before this: payout requests, via a unique
+/// constraint on (affiliateId, idempotencyKey). That guaranteed the *invariant*
+/// -- one payout per key -- but not the *semantics*: a retry got whatever the
+/// service happened to return second time round rather than the original
+/// response, and a retry arriving while the first was still running raced it.
+///
+/// Storing the response is what turns "at least once" delivery into
+/// "effectively once" processing, which is the guarantee a retrying client
+/// actually needs.
+model IdempotencyKey {
+  id       String @id @default(cuid())
+  key      String
+  /// Method plus route pattern. Scoped per endpoint so the same key reused
+  /// against a different operation is not mistaken for a retry of this one.
+  endpoint String
+
+  userId String?
+
+  /// SHA-256 of the canonical body. The same key with a *different* body is a
+  /// client bug; replaying the first response would hide it, so it is refused.
+  fingerprint String
+
+  status       IdempotencyStatus @default(IN_PROGRESS)
+  responseCode Int?
+  responseBody Json?
+
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@unique([key, endpoint])
+  @@index([expiresAt])
+}
+
+enum IdempotencyStatus {
+  IN_PROGRESS
+  COMPLETED
+}

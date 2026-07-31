@@ -3,6 +3,7 @@ import { logger } from '../lib/logger';
 import { beat } from '../lib/heartbeat';
 import { cleanupRefreshTokens } from '../services/auth.service';
 import { withLease } from '../lib/lease';
+import { cleanupIdempotencyKeys } from '../plugins/idempotency';
 
 export const WORKER_NAME = 'lock-expiry';
 const TICK_MS = 60_000;
@@ -81,6 +82,11 @@ export async function startLockExpiryWorker() {
         const { deleted } = await cleanupRefreshTokens();
         if (deleted > 0) {
           logger.info({ count: deleted }, 'Expired refresh tokens swept');
+        }
+
+        const keys = await cleanupIdempotencyKeys();
+        if (keys.deleted > 0) {
+          logger.info({ count: keys.deleted }, 'Expired idempotency keys swept');
         }
 
         return promoted;

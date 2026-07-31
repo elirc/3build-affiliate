@@ -61,6 +61,13 @@ export async function conversionRoutes(app: FastifyInstance) {
             // IPs behind a NAT or a serverless platform.
             keyGenerator: (req) => String(req.headers['x-affiliate-key'] ?? req.ip),
           },
+          // The endpoint that most needs this: a brand's storefront retries on
+          // timeout, and it cannot tell a request that was applied from one
+          // that was not. `(campaignId, externalOrderId)` is unique, so a
+          // duplicate could never create a second conversion -- but it would
+          // return a 409 that looks like a failure, and the storefront would
+          // keep retrying something that had in fact succeeded.
+          idempotent: true,
         },
       },
       async (req, reply) => {

@@ -53,12 +53,23 @@ describe('idempotency middleware', () => {
     });
   }
 
+  /**
+   * A fixed startDate, deliberately.
+   *
+   * Written first as `new Date().toISOString()`, which made every call produce
+   * a *different* body -- so a "retry" carried a different fingerprint and was
+   * correctly refused with 422. The middleware was right and the fixture was
+   * wrong, which is worth keeping as a comment: a retry means the same bytes,
+   * and anything generated per call is not the same bytes.
+   */
+  const START_DATE = '2026-01-01T00:00:00.000Z';
+
   const campaignBody = (name = 'Summer Sale') => ({
     name,
     description: 'A campaign',
     landingPageUrl: 'https://example.com/landing',
     allowedDomains: ['example.com'],
-    startDate: new Date().toISOString(),
+    startDate: START_DATE,
     commissionStructure: { type: 'percentage' as const, percentage: 10 },
     lockPeriodDays: 0,
   });

@@ -39,6 +39,14 @@ export async function internalRoutes(app: FastifyInstance) {
    */
   app.get<{ Params: { shortCode: string } }>(
     '/internal/links/:shortCode',
+    {
+      // Not rate limited. Every call comes from the redirect service, so they
+      // all share one source address and one bucket -- a limit here is a limit
+      // on the whole platform's click volume, applied by accident. The shared
+      // token and the proxy that refuses /internal/* from outside are the
+      // controls; a counter keyed on our own deployable's IP is not.
+      config: { rateLimit: false },
+    },
     async (req, reply) => {
       requireInternalToken(req);
 

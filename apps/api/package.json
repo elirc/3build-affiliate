@@ -17,13 +17,13 @@
     "db:seed": "tsx --env-file-if-exists=../../.env prisma/seed.ts"
   },
   "dependencies": {
-    "@affiliate/shared": "*",
     "@affiliate/analytics": "*",
+    "@affiliate/shared": "*",
     "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^11.2.0",
     "@fastify/helmet": "^13.0.2",
     "@fastify/jwt": "^10.1.0",
-    "@fastify/rate-limit": "^10.3.0",
+    "@fastify/multipart": "^9.0.3",
     "@prisma/client": "^5.14.0",
     "argon2": "^0.40.1",
     "bullmq": "^5.7.0",
@@ -31,8 +31,7 @@
     "ioredis": "^5.4.1",
     "pino": "^9.0.0",
     "ua-parser-js": "^1.0.37",
-    "zod": "^3.23.0",
-    "@fastify/multipart": "^9.0.3"
+    "zod": "^3.23.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

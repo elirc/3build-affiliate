@@ -16,17 +16,28 @@ function tokenContext(req: FastifyRequest): TokenContext {
 export async function authRoutes(app: FastifyInstance) {
   const svc = authService(app);
 
-  app.post('/register', async (req) => {
+  /**
+   * The three endpoints that accept a credential, and therefore the three an
+   * attacker guesses against. They get the brute-force tier: ten a minute per
+   * IP, and -- unlike everywhere else -- they reject rather than fall open if
+   * the limiter cannot be reached, because here the limit *is* the control.
+   *
+   * The rest of this file is ordinary authenticated traffic and takes the
+   * default; guessing at `/me` gets you nothing you did not already have.
+   */
+  const credentialLimit = { config: { rateLimit: 'auth' } } as const;
+
+  app.post('/register', credentialLimit, async (req) => {
     const input = registerSchema.parse(req.body);
     return svc.register(input, tokenContext(req));
   });
 
-  app.post('/login', async (req) => {
+  app.post('/login', credentialLimit, async (req) => {
     const input = loginSchema.parse(req.body);
     return svc.login(input, tokenContext(req));
   });
 
-  app.post('/refresh', async (req) => {
+  app.post('/refresh', credentialLimit, async (req) => {
     const { refreshToken } = refreshSchema.parse(req.body);
     // Returns a *new* refresh token every time. A client that keeps sending
     // the old one trips reuse detection and logs itself out -- correct

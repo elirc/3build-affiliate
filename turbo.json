@@ -19,7 +19,9 @@
     "NEXT_PUBLIC_API_URL",
     "NEXT_PUBLIC_REDIRECT_URL",
     "WEBHOOK_ALLOW_PRIVATE_TARGETS",
-    "SLOW_REQUEST_DB_MS"
+    "SLOW_REQUEST_DB_MS",
+    "BULK_SEED",
+    "QUERY_BUDGET_MS"
   ],
   "tasks": {
     "build": {

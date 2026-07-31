@@ -1,8 +1,21 @@
-# User stories — next phase
+# User stories — built
 
-20 stories, ordered so that earlier ones unblock later ones. Each is written to
-be picked up cold: it says what to build, how you'll know it's done, which
-files to open, and what to test.
+> **Status: all twenty are done and on `main`,** each through its own pull
+> request. This document is kept as the record of what each story was judged
+> against: the acceptance criteria, the files, and the tests that had to exist.
+>
+> The reasoning behind each implementation — including where a choice was
+> genuinely arguable — is in the PR that delivered it. Search the
+> [pull requests](https://github.com/elirc/3build-affiliate/pulls?q=is%3Apr)
+> for the story number.
+>
+> Two stories grew in the building, and the PRs say so: US-17 turned out to be
+> hiding a bug where failed click batches were lost outright, and US-14's cap
+> on sub-IDs existed only at the edge until a test pushed straight to the queue.
+
+20 stories, ordered so that earlier ones unblock later ones. Each was written to
+be picked up cold: what to build, how you'll know it's done, which files to
+open, and what to test.
 
 **Read [01-app-overview.md](./01-app-overview.md) first.** These stories assume
 you know the commission state machine and the click/conversion flows.

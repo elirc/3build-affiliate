@@ -48,6 +48,26 @@ describe('isBlockedAddress', () => {
     expect(isBlockedAddress('::FFFF:169.254.169.254')).toBe(true);
     expect(isBlockedAddress('::ffff:93.184.216.34')).toBe(false);
   });
+
+  it('sees through the hex spelling of an embedded IPv4 address', () => {
+    // Only the dotted form was recognised, so `::a00:5` -- 10.0.0.5 written in
+    // hex -- walked through a guard whose entire job is refusing 10/8. A check
+    // that depends on notation is not a check.
+    expect(isBlockedAddress('::a00:5')).toBe(true); // 10.0.0.5
+    expect(isBlockedAddress('::ffff:7f00:1')).toBe(true); // 127.0.0.1
+    expect(isBlockedAddress('::ffff:a9fe:a9fe')).toBe(true); // 169.254.169.254
+    expect(isBlockedAddress('::7f00:1')).toBe(true); // 127.0.0.1, compatible form
+
+    // and still lets a genuinely public address through in the same notation
+    expect(isBlockedAddress('::ffff:808:808')).toBe(false); // 8.8.8.8
+  });
+
+  it('rejects IPv6 multicast', () => {
+    // The IPv4 side already refused 224/4. Leaving the v6 equivalent out was an
+    // asymmetry rather than a decision.
+    expect(isBlockedAddress('ff02::1')).toBe(true); // all nodes on this link
+    expect(isBlockedAddress('ff05::2')).toBe(true);
+  });
 });
 
 describe('parseWebhookUrl', () => {

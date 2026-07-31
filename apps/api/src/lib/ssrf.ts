@@ -43,8 +43,23 @@ export function isBlockedAddress(address: string): boolean {
 
   // IPv4-mapped and IPv4-compatible IPv6 are IPv4 with extra syntax, and a
   // guard that only pattern-matches the text form waves them through.
-  const mapped = normalised.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
+  const mapped = normalised.match(/^::(?:ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/);
   if (mapped) return isBlockedAddress(mapped[1]!);
+
+  // The same addresses again, spelled in hex.
+  //
+  // `::ffff:7f00:1` and `::a00:5` are 127.0.0.1 and 10.0.0.5, and only the
+  // dotted spelling was recognised -- so the hex form of exactly the addresses
+  // this function exists to refuse went straight through it. An allow/deny
+  // check that depends on notation is not a check.
+  const embedded = normalised.match(/^::(?:ffff:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (embedded) {
+    const high = parseInt(embedded[1]!, 16);
+    const low = parseInt(embedded[2]!, 16);
+    return isBlockedAddress(
+      `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`
+    );
+  }
 
   const octets = ipv4Octets(normalised);
   if (octets) {
@@ -68,6 +83,10 @@ export function isBlockedAddress(address: string): boolean {
   // enumerate, and this is the part that identifies the range.
   if (/^f[cd]/.test(normalised)) return true;
   if (/^fe[89ab]/.test(normalised)) return true;
+  // ff00::/8 multicast. The IPv4 side already refuses 224/4; leaving the v6
+  // equivalent out was an asymmetry rather than a decision, and `ff02::1` is
+  // all-nodes-on-this-link.
+  if (/^ff/.test(normalised)) return true;
 
   return false;
 }

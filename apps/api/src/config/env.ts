@@ -82,5 +82,28 @@ export const envSchema = z.object({
   IMPORT_STORAGE_PATH: z.string().default("./storage/imports"),
 });
 
-export const env = envSchema.parse(process.env);
+/**
+ * Refuse to boot production with the SSRF check disabled.
+ *
+ * `WEBHOOK_ALLOW_PRIVATE_TARGETS` exists so an integration test can deliver to
+ * a stub on loopback -- a suite that cannot open a real socket cannot prove the
+ * timeout works. That is a good reason to have the flag and no reason at all to
+ * let it survive into production, where it turns webhook delivery into an
+ * arbitrary-address fetch.
+ *
+ * Crashing at startup rather than logging a warning, because a warning about a
+ * disabled security control is a warning nobody reads until afterwards. The
+ * failure is loud, immediate, and impossible to get past by accident.
+ */
+const parsed = envSchema.parse(process.env);
+
+if (parsed.NODE_ENV === 'production' && parsed.WEBHOOK_ALLOW_PRIVATE_TARGETS) {
+  throw new Error(
+    'WEBHOOK_ALLOW_PRIVATE_TARGETS must not be enabled in production: it ' +
+      'disables the SSRF address check on webhook delivery. It exists only so ' +
+      'tests can reach a loopback stub.'
+  );
+}
+
+export const env = parsed;
 export type Env = typeof env;

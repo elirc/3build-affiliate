@@ -12,12 +12,20 @@ Engineering documentation for the Affiliate & Referral Marketing Platform.
 
 ## Where the project stands
 
-All twenty feature stories are on `main`, each through its own pull request.
-The current backlog is [04-backend-stories.md](./04-backend-stories.md) — ten
-stories aimed at backend depth rather than features. Several of them fix
-problems that are already latent in the code: every API instance runs its own
-`setInterval` workers (BE-07), one malformed click event can cost 99 good ones
-(BE-03), and refresh tokens are never rotated (BE-01).
+All twenty feature stories (US-01 … US-20) and all ten backend stories
+(BE-01 … BE-10) are on `main`, each through its own pull request.
+
+Three of the backend stories fixed problems that were already in the code and
+had simply not bitten yet:
+
+- **BE-07** — `server.ts` started three `setInterval` workers in *every*
+  process. On one instance that is invisible; on two, lock expiry and
+  notification delivery ran twice a tick.
+- **BE-03** — one click event that parsed as JSON but violated a foreign key
+  failed the whole transaction and sent all 100 batched events to the
+  dead-letter queue, where replay fed the poison message straight back in.
+- **BE-01** — refresh tokens were never rotated and never recorded, so a stolen
+  one worked for thirty days and left no trace.
 
 Start at
 the [pull request list](https://github.com/elirc/3build-affiliate/pulls?q=is%3Apr)
@@ -25,21 +33,33 @@ if you want the reasoning behind a particular decision — every PR carries a
 "Trade-offs" section explaining what was chosen and what it cost.
 
 ```text
-120 unit tests
-153 integration tests   (real Postgres + Redis)
+181 unit tests
+274 integration tests   (real Postgres + Redis, 1 skipped)
 ```
 
-`npm run test` for the fast ones, `npm run test:integration` for the rest.
+The skipped one is BE-06's query-budget guard, which needs the bulk seed;
+set `BULK_SEED=1` to run it. `npm run test` for the fast ones,
+`npm run test:integration` for the rest.
 
 **Still open**, and written down rather than glossed over:
 
 - No email verification and no password reset (gap 20).
 - Notifications are enqueued, retried and surfaced in the UI, but the delivery
-  driver logs to the console — nothing reaches an inbox.
+  driver logs to the console — nothing reaches an inbox. Outbound *webhooks*
+  (BE-05) do deliver for real; user-facing notifications still do not.
 - Uploads go to local disk, which does not survive a second instance.
 - `fraud.evaluate` still runs *after* its transaction commits, so a crash in
   between loses the fraud review. US-19 demonstrates the outbox pattern that
-  fixes it.
+  fixes it, and BE-05 now uses it.
+- Refresh tokens still live in `localStorage`. BE-01 made a theft detectable
+  and single-use; it did not make it impossible.
+- Five high-severity advisories in production dependencies, including the
+  Next.js canary line. Deliberately not bundled into a correctness PR — it is
+  maintenance, and it needs its own re-verification pass.
+- BE-06 did not reach its 100 ms budget for the two brand-level dashboard
+  queries (220–380 ms). They are not I/O-bound at that point; a daily rollup
+  is the real fix and is its own story. The guard ships at 750 ms rather than
+  shipping a knowingly-red test.
 
 ## Who these are for
 

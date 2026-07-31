@@ -12,3 +12,4 @@ export * from './sub-ids';
 export * from './periods';
 export * from './bot-detection';
 export * from './bisect';
+export * from './token-bucket';

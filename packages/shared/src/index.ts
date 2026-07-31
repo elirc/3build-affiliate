@@ -16,3 +16,4 @@ export * from './schemas/payout.schemas';
 export * from './schemas/api-key.schemas';
 export * from './schemas/profile.schemas';
 export * from './utils/short-code';
+export * from './schemas/click-event.schemas';

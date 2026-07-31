@@ -123,7 +123,16 @@ describe('system health', () => {
       })
     );
 
-    await expect(drainClickEvents()).rejects.toThrow();
+    // This used to assert that the drain *rejects*, because a failing event
+    // failed the whole batch and the caller had to know. Since BE-03 the batch
+    // is bisected: the bad event is isolated and dead-lettered, and the drain
+    // resolves normally because nothing went wrong at the batch level.
+    //
+    // The guarantee this test exists for is unchanged and still asserted --
+    // the event lands in the DLQ rather than being lost.
+    const result = await drainClickEvents();
+    expect(result.deadLettered).toBe(1);
+    expect(result.flushed).toBe(0);
 
     expect(await redis.llen(DLQ_KEY)).toBe(1);
     expect(await redis.llen(QUEUE_KEY)).toBe(0);

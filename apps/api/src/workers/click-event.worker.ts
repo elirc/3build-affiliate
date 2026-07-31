@@ -9,7 +9,8 @@ import { prisma } from '../config/prisma';
 import { redis } from '../config/redis';
 import { logger } from '../lib/logger';
 import { beat } from '../lib/heartbeat';
-import type { ClickEventPayload } from '@affiliate/shared';
+import { clickEventPayloadSchema, type ClickEventPayload } from '@affiliate/shared';
+import { bisectCommit } from '@affiliate/analytics';
 
 export const QUEUE_KEY = 'click_events';
 
@@ -22,6 +23,18 @@ export const QUEUE_KEY = 'click_events';
  * They now land here instead, where they can be counted and replayed.
  */
 export const DLQ_KEY = 'click_events_dlq';
+
+/**
+ * Where a message goes once it has failed enough times to be hopeless.
+ *
+ * Without this the DLQ is a loop: replay puts the poison message back on the
+ * main queue, it fails again, and it returns. Parking takes it out of
+ * circulation and makes the decision an operator's rather than a machine's.
+ */
+export const PARKED_KEY = 'click_events_parked';
+
+/** Failures before a message is parked rather than retried again. */
+export const MAX_ATTEMPTS = 3;
 
 export const WORKER_NAME = 'click-event';
 const BATCH_INTERVAL_MS = 1000;
@@ -45,43 +58,156 @@ function cappedSubIds(raw: Record<string, string> | undefined) {
   return Object.keys(subIds).length > 0 ? subIds : undefined;
 }
 
-export async function drainClickEvents(): Promise<{ flushed: number }> {
+export async function drainClickEvents(): Promise<{
+  flushed: number;
+  deadLettered: number;
+}> {
   const events: ClickEventPayload[] = [];
-  // The original strings, so a failed batch can be requeued exactly as it
+  // The original strings, so a message can be dead-lettered exactly as it
   // arrived rather than as our re-serialisation of it.
   const raws: string[] = [];
+  /** Prior failure history per event, for messages that arrived via a replay. */
+  const priors: (DeadLetterEnvelope | null)[] = [];
+  let deadLettered = 0;
 
   for (let i = 0; i < BATCH_MAX; i++) {
     const raw = await redis.rpop(QUEUE_KEY);
     if (!raw) break;
+
+    let parsed: unknown;
     try {
-      events.push(JSON.parse(raw));
-      raws.push(raw);
+      parsed = JSON.parse(raw);
     } catch (err) {
       // Malformed JSON will never parse, however many times it is retried.
-      // Requeuing it would block the DLQ forever, so it is dropped and logged.
-      logger.warn({ err, raw }, 'Discarding malformed click event');
+      // Requeuing it would block the queue forever, so it is dropped, logged,
+      // and counted.
+      logger.warn({ err, raw: raw.slice(0, 200) }, 'Discarding malformed click event');
+      continue;
     }
-  }
-  if (events.length === 0) return { flushed: 0 };
 
+    // A replayed message arrives wrapped, carrying the attempt count it has
+    // already accumulated. A fresh one from the redirect service does not.
+    // Unwrapping here is what lets a message be given up on after three
+    // failures instead of cycling forever.
+    const envelope = asEnvelope(parsed);
+    const payload = envelope ? envelope.payload : parsed;
+
+    // Validated, not cast. The old code trusted `JSON.parse` and asserted the
+    // type -- so an event missing `trackingLinkId` reached Prisma and failed
+    // the transaction, taking the other 99 with it.
+    //
+    // Unlike malformed JSON these are *not* dropped. A schema failure may well
+    // be a bug in our own producer, and silently discarding the evidence is
+    // how you end up unable to explain a gap in the numbers.
+    const result = clickEventPayloadSchema.safeParse(payload);
+    if (!result.success) {
+      await deadLetter(
+        JSON.stringify(payload),
+        `schema: ${result.error.issues[0]?.message ?? 'invalid'}`,
+        envelope ?? undefined
+      );
+      deadLettered += 1;
+      continue;
+    }
+
+    events.push(result.data as ClickEventPayload);
+    raws.push(JSON.stringify(payload));
+    priors.push(envelope);
+  }
+
+  if (events.length === 0) return { flushed: 0, deadLettered };
+
+  // Bisecting rather than failing the batch.
+  //
+  // A foreign key that does not resolve cannot be caught by a schema -- only
+  // the database knows. Previously one such event rolled back the whole
+  // transaction and sent all 100 to the DLQ, where replay fed the poison
+  // message straight back in and it happened again.
+  const outcome = await bisectCommit(events, flushBatch);
+
+  for (const failure of outcome.failed) {
+    const index = events.indexOf(failure.item);
+    const raw = index >= 0 ? raws[index]! : JSON.stringify(failure.item);
+    await deadLetter(
+      raw,
+      String(failure.error).slice(0, 500),
+      index >= 0 ? (priors[index] ?? undefined) : undefined
+    );
+    deadLettered += 1;
+  }
+
+  if (outcome.attempts > 1) {
+    logger.warn(
+      {
+        attempts: outcome.attempts,
+        committed: outcome.succeeded.length,
+        deadLettered: outcome.failed.length,
+      },
+      'Click batch bisected to isolate failing events'
+    );
+  }
+
+  return { flushed: outcome.succeeded.length, deadLettered };
+}
+
+/**
+ * A dead-letter entry is an envelope, not a bare payload.
+ *
+ * The payload alone tells an operator what failed but not why, nor how many
+ * times it has been tried -- so there is no way to decide between fixing the
+ * cause and giving up on the message.
+ */
+export interface DeadLetterEnvelope {
+  payload: unknown;
+  reason: string;
+  attempts: number;
+  firstFailedAt: number;
+  lastFailedAt: number;
+}
+
+async function deadLetter(raw: string, reason: string, previous?: DeadLetterEnvelope) {
+  const now = Date.now();
+  const envelope: DeadLetterEnvelope = {
+    payload: previous ? previous.payload : safeParse(raw),
+    reason,
+    attempts: (previous?.attempts ?? 0) + 1,
+    firstFailedAt: previous?.firstFailedAt ?? now,
+    lastFailedAt: now,
+  };
+
+  const target = envelope.attempts >= MAX_ATTEMPTS ? PARKED_KEY : DLQ_KEY;
+  if (target === PARKED_KEY) {
+    logger.error(
+      { reason, attempts: envelope.attempts },
+      'Click event parked after repeated failures; it will not be retried again'
+    );
+  }
+
+  await redis.lpush(target, JSON.stringify(envelope)).catch((err) => {
+    logger.error({ err, reason }, 'Could not write a failed click event to the dead-letter queue');
+  });
+}
+
+function safeParse(raw: string): unknown {
   try {
-    await flushBatch(events);
-  } catch (err) {
-    // The events are already off the main queue. Without this they would be
-    // gone; the DLQ is what makes the failure recoverable.
-    if (raws.length > 0) {
-      await redis.lpush(DLQ_KEY, ...raws).catch((dlqErr) => {
-        logger.error(
-          { err: dlqErr, count: raws.length },
-          'Could not write failed click events to the dead-letter queue'
-        );
-      });
-    }
-    throw err;
+    return JSON.parse(raw);
+  } catch {
+    return { raw };
   }
+}
 
-  return { flushed: events.length };
+/** Recognises a dead-letter envelope, so a replayed message keeps its history. */
+function asEnvelope(value: unknown): DeadLetterEnvelope | null {
+  if (
+    value &&
+    typeof value === 'object' &&
+    'payload' in value &&
+    'attempts' in value &&
+    typeof (value as DeadLetterEnvelope).attempts === 'number'
+  ) {
+    return value as DeadLetterEnvelope;
+  }
+  return null;
 }
 
 async function flushBatch(events: ClickEventPayload[]) {
@@ -148,15 +274,53 @@ async function flushBatch(events: ClickEventPayload[]) {
  * violated -- and an automatic retry loop turns one outage into a spin. An
  * operator decides when the cause is fixed.
  */
-export async function replayDeadLetters(limit = 1000): Promise<{ replayed: number }> {
+export async function replayDeadLetters(
+  limit = 1000
+): Promise<{ replayed: number; parked: number }> {
   let replayed = 0;
+  let parked = 0;
+
   for (let i = 0; i < limit; i++) {
     const raw = await redis.rpop(DLQ_KEY);
     if (!raw) break;
+
+    const envelope = asEnvelope(safeParse(raw));
+
+    // A message that has already burned its attempts goes to the parked list
+    // instead of back onto the queue. Replaying it forever is how one bad
+    // event holds up the pipeline indefinitely -- which is exactly what the
+    // previous version did, since it put the payload straight back with no
+    // memory of having tried.
+    if (envelope && envelope.attempts >= MAX_ATTEMPTS) {
+      await redis.lpush(PARKED_KEY, raw);
+      parked += 1;
+      continue;
+    }
+
+    // Requeued as the envelope, not the bare payload, so the attempt count
+    // survives the round trip. `drainClickEvents` unwraps it.
     await redis.lpush(QUEUE_KEY, raw);
     replayed += 1;
   }
-  return { replayed };
+
+  if (parked > 0) {
+    logger.warn(
+      { parked },
+      'Dead-lettered click events parked instead of replayed; they have failed too often'
+    );
+  }
+
+  return { replayed, parked };
+}
+
+/** Queue depths, for the admin health page. */
+export async function queueDepths() {
+  const [pending, dead, parkedCount] = await Promise.all([
+    redis.llen(QUEUE_KEY),
+    redis.llen(DLQ_KEY),
+    redis.llen(PARKED_KEY),
+  ]);
+  return { pending, dead, parked: parkedCount };
 }
 
 /**
@@ -177,11 +341,14 @@ export async function startClickEventWorker() {
 
   const tick = async () => {
     try {
-      const { flushed } = await drainClickEvents();
+      const { flushed, deadLettered } = await drainClickEvents();
       if (flushed > 0) logger.debug({ count: flushed }, 'Click events flushed');
-      await beat(WORKER_NAME, BATCH_INTERVAL_MS, { lastFlushed: flushed });
+      await beat(WORKER_NAME, BATCH_INTERVAL_MS, { lastFlushed: flushed, deadLettered });
     } catch (err) {
-      logger.error({ err }, 'Click event flush failed; batch moved to the DLQ');
+      // Reaching here is now rare: a failing batch is bisected and only the
+      // individual bad events are dead-lettered, so this is for something
+      // wider -- Redis or Postgres being unreachable.
+      logger.error({ err }, 'Click event drain failed');
       // Still a beat: the worker is alive and failing, which is a different
       // state from absent, and the health page needs to tell them apart.
       await beat(WORKER_NAME, BATCH_INTERVAL_MS, { lastError: String(err) });

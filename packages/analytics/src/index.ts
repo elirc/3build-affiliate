@@ -11,3 +11,4 @@ export * from './sort';
 export * from './sub-ids';
 export * from './periods';
 export * from './bot-detection';
+export * from './bisect';

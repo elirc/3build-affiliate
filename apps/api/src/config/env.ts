@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import { boolFromString } from './env-parsers';
 
 export const envSchema = z.object({
@@ -14,6 +15,16 @@ export const envSchema = z.object({
   JWT_REFRESH_TTL: z.string().default('30d'),
   PLATFORM_FEE_PERCENT: z.coerce.number().min(0).max(50).default(5),
   DISABLE_WORKERS: boolFromString(false),
+
+  /**
+   * Identifies this process in logs and in scheduler leases.
+   *
+   * Generated when absent so a local run works without configuration, but a
+   * deployment should set it to something meaningful (a pod name, a task ARN)
+   * -- when a lease is stuck, the first question is who holds it, and a random
+   * id can only tell you "not me".
+   */
+  INSTANCE_ID: z.string().min(1).default(randomUUID()),
 
   // Shared secret for service-to-service calls from the redirect service.
   // Not a user credential: it authenticates a deployable, not a person.

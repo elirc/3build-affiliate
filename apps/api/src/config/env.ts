@@ -65,6 +65,16 @@ export const envSchema = z.object({
    * does not open the API -- only the delivery-time address check relaxes.
    */
   WEBHOOK_ALLOW_PRIVATE_TARGETS: boolFromString(false),
+
+  /**
+   * Database time, in milliseconds, above which a request is logged at `warn`.
+   *
+   * Deliberately a *budget* for the whole request rather than a per-query
+   * threshold: forty 10ms queries make a page as slow as one 400ms query, and
+   * only the total notices both. 200ms is about where a dashboard stops
+   * feeling instant.
+   */
+  SLOW_REQUEST_DB_MS: z.coerce.number().int().min(1).default(200),
 });
 
 export const env = envSchema.parse(process.env);

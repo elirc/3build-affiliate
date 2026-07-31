@@ -7,6 +7,7 @@ import rateLimit from '@fastify/rate-limit';
 import { env } from './config/env';
 import { logger } from './lib/logger';
 import { registerErrorHandler } from './lib/error-handler';
+import { registerIdempotency } from './plugins/idempotency';
 import { authRoutes } from './routes/auth.routes';
 import { campaignRoutes } from './routes/campaign.routes';
 import { trackingRoutes } from './routes/tracking.routes';
@@ -57,6 +58,9 @@ export async function build(options: BuildOptions = {}) {
   }
 
   registerErrorHandler(app);
+  // Before the routes: hooks on the parent are inherited by the child scopes
+  // that `app.register(..., { prefix })` creates below.
+  registerIdempotency(app);
 
   app.get('/health', async () => ({
     status: 'ok',

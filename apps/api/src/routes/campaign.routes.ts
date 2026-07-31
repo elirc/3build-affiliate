@@ -32,7 +32,13 @@ export async function campaignRoutes(app: FastifyInstance) {
 
   app.post(
     '/brand/campaigns',
-    { preHandler: [requireAuth, requireRole('BRAND')] },
+    {
+      preHandler: [requireAuth, requireRole('BRAND')],
+      // Nothing stops a double-submitted form creating two identical
+      // campaigns, and there is no natural unique key to lean on the way
+      // conversions and payouts have.
+      config: { idempotent: true },
+    },
     async (req, reply) => {
       const input = createCampaignSchema.parse(req.body);
       const user = (req as AuthedRequest).user;

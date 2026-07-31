@@ -48,7 +48,16 @@ export async function payoutRoutes(app: FastifyInstance) {
 
   app.post(
     '/affiliate/payouts',
-    { preHandler: [requireAuth, requireRole('AFFILIATE')] },
+    {
+      preHandler: [requireAuth, requireRole('AFFILIATE')],
+      // The unique constraint on (affiliateId, idempotencyKey) below still
+      // guarantees the *invariant* -- one payout per key -- and stays as the
+      // last line of defence. The plugin adds the *semantics*: a retry gets
+      // the original response back rather than whatever the service returns
+      // second time round, and a retry arriving mid-flight is told to wait
+      // instead of racing.
+      config: { idempotent: true },
+    },
     async (req, reply) => {
       const input = requestPayoutSchema.parse(req.body);
       const user = (req as AuthedRequest).user;

@@ -7,10 +7,18 @@ Engineering documentation for the Affiliate & Referral Marketing Platform.
 | [01-app-overview.md](./01-app-overview.md) | How the app works: architecture, data model, the two critical request flows, and conventions. Section 8 records what was wrong when the codebase was inherited and where each thing was fixed. **Read this first.** |
 | [02-user-stories.md](./02-user-stories.md) | The 20 stories that were built, with the acceptance criteria and trade-offs each was judged against. Now a record rather than a backlog — see the status note at the top. |
 | [03-postback-integration.md](./03-postback-integration.md) | For a brand's engineers: how to sign and send conversion reports. Written to be shared outside this repo. |
+| [04-backend-stories.md](./04-backend-stories.md) | Ten backend-depth stories (BE-01 … BE-10) chosen for what they teach: token rotation, idempotency, poison messages, keyset pagination, webhook delivery, query plans, leader election, observability, rate limiting, streamed imports. **This is the current backlog.** |
 
 ## Where the project stands
 
-All twenty stories are on `main`, each through its own pull request. Start at
+All twenty feature stories are on `main`, each through its own pull request.
+The current backlog is [04-backend-stories.md](./04-backend-stories.md) — ten
+stories aimed at backend depth rather than features. Several of them fix
+problems that are already latent in the code: every API instance runs its own
+`setInterval` workers (BE-07), one malformed click event can cost 99 good ones
+(BE-03), and refresh tokens are never rotated (BE-01).
+
+Start at
 the [pull request list](https://github.com/elirc/3build-affiliate/pulls?q=is%3Apr)
 if you want the reasoning behind a particular decision — every PR carries a
 "Trade-offs" section explaining what was chosen and what it cost.

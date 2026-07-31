@@ -41,9 +41,16 @@ export async function importRoutes(app: FastifyInstance) {
     {
       preHandler: [requireAuth, requireRole('BRAND')],
       config: {
-        // Tight. Each accepted upload costs disk and minutes of worker time,
-        // and no legitimate migration needs more than a handful.
-        rateLimit: { max: 10, timeWindow: '1 minute' },
+        // Tight, and with no burst headroom: each accepted upload costs disk
+        // and minutes of worker time, and a migration is something a person
+        // does a handful of times, never in a loop.
+        //
+        // `failOpen: false` -- if Redis cannot answer, refuse the upload. The
+        // usual argument for failing open is that a read should not break
+        // because the limiter is unavailable. This is not a read; it is 100MB
+        // of disk and a queued job, and the safe answer to "I cannot count
+        // this" is no.
+        rateLimit: { perMinute: 10, burst: 10, scope: 'user', failOpen: false },
         // Deliberately *not* idempotent-keyed. The plugin fingerprints
         // `req.body`, which for a multipart upload is not the file -- so two
         // different files would share a fingerprint and the second would

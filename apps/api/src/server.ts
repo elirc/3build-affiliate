@@ -3,11 +3,11 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
 import cookie from '@fastify/cookie';
-import rateLimit from '@fastify/rate-limit';
 import { env } from './config/env';
 import { logger } from './lib/logger';
 import { registerErrorHandler } from './lib/error-handler';
 import { registerIdempotency } from './plugins/idempotency';
+import { registerRateLimit } from './plugins/rate-limit';
 import { authRoutes } from './routes/auth.routes';
 import { campaignRoutes } from './routes/campaign.routes';
 import { trackingRoutes } from './routes/tracking.routes';
@@ -28,10 +28,15 @@ import { startNotificationWorker } from './workers/notification.worker';
 export interface BuildOptions {
   /**
    * Tests drive the app through `app.inject()`, which replays requests through
-   * the real router without binding a socket. The global rate limiter counts
-   * those the same as real traffic, so a suite of a few hundred requests
-   * starts getting 429s partway through and fails in a way that looks like a
-   * bug in whatever it happened to be testing.
+   * the real router without binding a socket. The rate limiter counts those the
+   * same as real traffic -- and every injected request arrives from 127.0.0.1,
+   * so a suite of a few hundred shares one bucket and starts getting 429s
+   * partway through, failing in a way that looks like a bug in whatever it
+   * happened to be testing.
+   *
+   * `false` skips registering the hook at all rather than raising the limits,
+   * because a limit high enough for every suite is no limit at all and would
+   * quietly stop testing the thing the suite is about.
    */
   rateLimit?: boolean;
 }
@@ -53,19 +58,29 @@ export async function build(options: BuildOptions = {}) {
   });
   await app.register(cookie);
   await app.register(jwt, { secret: env.JWT_SECRET });
-  if (options.rateLimit !== false) {
-    await app.register(rateLimit, { max: 200, timeWindow: '1 minute' });
-  }
 
   registerErrorHandler(app);
   // Before the routes: hooks on the parent are inherited by the child scopes
   // that `app.register(..., { prefix })` creates below.
+  //
+  // The limiter is an `onRequest` hook and idempotency a `preHandler`, so a
+  // throttled request is rejected before a key is ever claimed for it --
+  // otherwise the client's honest retry would replay the 429 back at itself
+  // for a day.
+  if (options.rateLimit !== false) registerRateLimit(app);
   registerIdempotency(app);
 
-  app.get('/health', async () => ({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-  }));
+  app.get(
+    '/health',
+    // Not rate limited. A load balancer polls this every second or two from a
+    // single address, and throttling the probe would take the instance out of
+    // rotation for being healthy.
+    { config: { rateLimit: false } },
+    async () => ({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+    })
+  );
 
   await app.register(authRoutes, { prefix: '/api/auth' });
   await app.register(campaignRoutes, { prefix: '/api' });

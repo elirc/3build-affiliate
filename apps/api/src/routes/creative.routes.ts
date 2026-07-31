@@ -25,9 +25,10 @@ export async function creativeRoutes(app: FastifyInstance) {
     {
       preHandler: [requireAuth, requireRole('BRAND')],
       config: {
-        // Tighter than the global limit. Uploads cost disk and CPU, and no
-        // legitimate brand adds banners in a hot loop.
-        rateLimit: { max: 30, timeWindow: '1 minute' },
+        // Tighter than the tier it belongs to. Uploads cost disk and CPU, and
+        // no legitimate brand adds banners in a hot loop. Burst equal to the
+        // rate, because there is no bulk-upload flow that would need one.
+        rateLimit: { tier: 'authenticated', perMinute: 30, burst: 30 },
       },
     },
     async (req, reply) => {

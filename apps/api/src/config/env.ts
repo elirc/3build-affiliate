@@ -38,10 +38,10 @@ export const envSchema = z.object({
     .string()
     .regex(/^[0-9a-fA-F]{64}$/, 'must be 64 hex characters (32 bytes)'),
 
-  // Postbacks get their own, more generous limit: a Black Friday spike is
-  // legitimate traffic and must not be throttled by the same bucket as the
-  // dashboard.
-  POSTBACK_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(1000),
+  // POSTBACK_RATE_LIMIT_PER_MINUTE used to live here. Rate limits are now a
+  // table of four tiers in lib/rate-limiter.ts: one tier being tunable from
+  // the environment while the other three were hard-coded was a trap, because
+  // the number you could see was not the policy you had.
 
   // Where creative uploads are written. Local disk for now; the ObjectStorage
   // interface in lib/storage.ts is the seam for moving to S3.

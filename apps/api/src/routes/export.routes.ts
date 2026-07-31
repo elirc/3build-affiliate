@@ -52,8 +52,8 @@ export async function exportRoutes(app: FastifyInstance) {
    * that nobody can loop it.
    */
   const exportRateLimit = {
-    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
-  };
+    config: { rateLimit: { tier: 'authenticated', perMinute: 10, burst: 10 } },
+  } as const;
 
   app.get(
     '/brand/conversions/export',

@@ -16,17 +16,38 @@ function tokenContext(req: FastifyRequest): TokenContext {
 export async function authRoutes(app: FastifyInstance) {
   const svc = authService(app);
 
-  app.post('/register', async (req) => {
+  /**
+   * The two endpoints that accept a password.
+   *
+   * 10/min per IP with a burst of 15 is generous for someone mistyping their
+   * password and hopeless for a script working through a word list. This is
+   * also the only tier that fails *closed* when Redis is unreachable: on every
+   * other route the limiter is a capacity guard and losing it costs headroom,
+   * but here it is the brute-force control itself, and serving unlimited
+   * guesses because a cache is down is not a trade to make quietly.
+   */
+  const credentialLimit = { config: { rateLimit: { tier: 'auth' } } } as const;
+
+  app.post('/register', credentialLimit, async (req) => {
     const input = registerSchema.parse(req.body);
     return svc.register(input, tokenContext(req));
   });
 
-  app.post('/login', async (req) => {
+  app.post('/login', credentialLimit, async (req) => {
     const input = loginSchema.parse(req.body);
     return svc.login(input, tokenContext(req));
   });
 
-  app.post('/refresh', async (req) => {
+  /**
+   * Deliberately *not* on the credential tier.
+   *
+   * A refresh token is a signed 256-bit value; nobody guesses one, and reuse
+   * detection (BE-01) is the control that matters here. Failing closed would
+   * mean a Redis outage logs every user out within one access-token lifetime
+   * -- a large availability cost to defend against an attack the rate limit
+   * was never what stopped.
+   */
+  app.post('/refresh', { config: { rateLimit: { tier: 'public' } } }, async (req) => {
     const { refreshToken } = refreshSchema.parse(req.body);
     // Returns a *new* refresh token every time. A client that keeps sending
     // the old one trips reuse detection and logs itself out -- correct

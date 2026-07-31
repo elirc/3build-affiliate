@@ -39,6 +39,14 @@ export async function internalRoutes(app: FastifyInstance) {
    */
   app.get<{ Params: { shortCode: string } }>(
     '/internal/links/:shortCode',
+    {
+      // Not rate limited. This is the redirect service's cache-miss path, and
+      // it arrives from one address at whatever rate shoppers happen to click.
+      // Throttling it would send real traffic to the fallback URL -- exactly
+      // the outage this endpoint was added to fix. The shared token is the
+      // control here; capacity is managed by the cache in front of it.
+      config: { rateLimit: false },
+    },
     async (req, reply) => {
       requireInternalToken(req);
 

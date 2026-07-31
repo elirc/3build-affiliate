@@ -17,6 +17,7 @@ export * from './schemas/payout.schemas';
 export * from './schemas/api-key.schemas';
 export * from './schemas/profile.schemas';
 export * from './utils/short-code';
+export * from './utils/request-id';
 export * from './schemas/click-event.schemas';
 export * from './pagination';
 export * from './schemas/webhook.schemas';

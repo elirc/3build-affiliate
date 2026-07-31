@@ -443,6 +443,11 @@ describe('bulk conversion import', () => {
     expect(outcome?.importedRows).toBe(50_000);
 
     const growthMb = (peak - before) / 1024 / 1024;
+    // Printed, not just asserted: a memory bound whose actual value nobody can
+    // see is a bound nobody will notice creeping upwards.
+    console.log(
+      `50,000-row import: peak RSS +${growthMb.toFixed(1)}MB over ${(size / 1024 / 1024).toFixed(1)}MB of CSV`
+    );
     expect(growthMb).toBeLessThan(200);
   }, 300_000);
 });

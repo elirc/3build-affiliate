@@ -7,6 +7,7 @@ import { env } from './config/env';
 import { logger } from './lib/logger';
 import { registerErrorHandler } from './lib/error-handler';
 import { registerIdempotency } from './plugins/idempotency';
+import { registerObservability } from './plugins/observability';
 import { registerRateLimit, type RateLimitOptions } from './plugins/rate-limit';
 import { registerDbTiming } from './plugins/db-timing';
 import { authRoutes } from './routes/auth.routes';
@@ -67,7 +68,13 @@ export async function build(options: BuildOptions = {}) {
   // Before the routes: hooks on the parent are inherited by the child scopes
   // that `app.register(..., { prefix })` creates below.
   //
-  // Rate limiting first, so a request that is going to be rejected is rejected
+  // Observability first, ahead of even the rate limiter. Binding a request id
+  // costs a regex and a UUID, and it is what makes a rejection *visible*: a
+  // 429 or a 409 that appears in no metric and carries no id is exactly the
+  // failure that gets argued about instead of measured.
+  registerObservability(app);
+
+  // Then rate limiting, so a request that is going to be rejected is rejected
   // before anything else spends work on it. It reads the JWT, so it has to
   // come after `@fastify/jwt` is registered.
   if (options.rateLimit !== false) {

@@ -50,29 +50,38 @@ export function fraudService() {
       }
     }
 
-    // Rule 2: IP repetition during the attribution window
+    // Rule 2: many clicks from one IP, for the cookie being scored.
+    //
+    // Both halves of this must describe the *same* traffic. They did not: the
+    // click count was scoped to the cookie while the distinct-IP count was
+    // taken across every click for the affiliate and campaign. So the rule
+    // read "this cookie clicked a lot AND the whole campaign has only ever
+    // seen one IP", and the second half stopped being true the moment a
+    // campaign had two real visitors -- which silently disabled the signal on
+    // exactly the busy campaigns worth policing.
+    //
+    // One grouped query now, so the two numbers cannot drift apart again.
     if (ctx.attributionCookieId) {
-      const ipCounts = await prisma.$queryRaw<{ count: bigint }[]>`
-        SELECT COUNT(DISTINCT ce."ipHash")::bigint as count
+      const rows = await prisma.$queryRaw<{ clicks: bigint; unique_ips: bigint }[]>`
+        SELECT COUNT(*)::bigint                    AS clicks,
+               COUNT(DISTINCT ce."ipHash")::bigint AS unique_ips
         FROM "ClickEvent" ce
         JOIN "TrackingLink" tl ON tl.id = ce."trackingLinkId"
-        WHERE tl."affiliateId" = ${ctx.affiliateId}
+        WHERE ce."attributionCookieId" = ${ctx.attributionCookieId}
+          AND tl."affiliateId" = ${ctx.affiliateId}
           AND tl."campaignId" = ${ctx.campaignId}
+          AND ce."isCounted" = true
           AND ce."timestamp" >= NOW() - INTERVAL '24 hours'
       `;
-      const uniqueIps = Number(ipCounts[0]?.count ?? 0);
 
-      const clickCount = await prisma.clickEvent.count({
-        where: {
-          attributionCookieId: ctx.attributionCookieId,
-          timestamp: { gte: new Date(Date.now() - 24 * 3600 * 1000) },
-        },
-      });
+      const clickCount = Number(rows[0]?.clicks ?? 0);
+      const uniqueIps = Number(rows[0]?.unique_ips ?? 0);
+
       if (clickCount > 5 && uniqueIps <= 1) {
         signals.push({
           rule: 'cookie_ip_concentration',
           score: 30,
-          detail: `${clickCount} clicks from ${uniqueIps} unique IP(s)`,
+          detail: `${clickCount} clicks from ${uniqueIps} unique IP(s) on this cookie`,
         });
       }
     }

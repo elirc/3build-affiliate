@@ -5,6 +5,10 @@ import { notificationService } from '../services/notification.service';
 import { requireAuth, type AuthedRequest } from '../lib/auth';
 import { Errors } from '../lib/errors';
 
+const listNotificationsQuerySchema = z.object({
+  unreadOnly: z.enum(['true', 'false']).default('false'),
+});
+
 const markReadSchema = z.object({
   ids: z.array(z.string().min(1)).min(1).max(100),
 });
@@ -19,7 +23,7 @@ export async function notificationRoutes(app: FastifyInstance) {
 
   app.get('/me/notifications', { preHandler: requireAuth }, async (req) => {
     const user = (req as AuthedRequest).user;
-    const { unreadOnly } = req.query as { unreadOnly?: string };
+    const { unreadOnly } = listNotificationsQuerySchema.parse(req.query);
     const [items, unread] = await Promise.all([
       svc.listForUser(user.id, { unreadOnly: unreadOnly === 'true' }),
       svc.unreadCount(user.id),

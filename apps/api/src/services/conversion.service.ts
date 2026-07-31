@@ -252,8 +252,20 @@ export function conversionService() {
       }
       const status = input.status === 'approved' ? 'APPROVED' : 'REJECTED';
       return prisma.$transaction(async (tx) => {
-        const updated = await tx.conversion.update({
-          where: { id: conversionId },
+        // Claim the conversion conditionally rather than updating by id.
+        //
+        // The PENDING check above happens outside this transaction, so two
+        // simultaneous reviews -- an approve and a reject, or a double-clicked
+        // button -- both passed it and both wrote, racing on the final state
+        // and emitting two contradictory notifications. Requiring the row to
+        // still be PENDING means exactly one of them wins and the other is
+        // told why.
+        //
+        // A single-statement conditional update is enough here because the
+        // transition is one-way; reversal needs a lock instead, because a
+        // partial refund leaves the status unchanged.
+        const claimed = await tx.conversion.updateMany({
+          where: { id: conversionId, status: 'PENDING' },
           data:
             status === 'APPROVED'
               ? { status, approvedAt: new Date() }
@@ -262,6 +274,14 @@ export function conversionService() {
                   rejectedAt: new Date(),
                   rejectionReason: input.reason,
                 },
+        });
+
+        if (claimed.count !== 1) {
+          throw Errors.conflict('Conversion has already been reviewed');
+        }
+
+        const updated = await tx.conversion.findUniqueOrThrow({
+          where: { id: conversionId },
         });
 
         if (status === 'REJECTED') {
@@ -306,49 +326,69 @@ export function conversionService() {
       conversionId: string,
       input: ReverseConversionInput
     ) {
-      const conv = await conversions.findById(conversionId);
-      if (!conv) throw Errors.notFound('Conversion');
+      // Ownership is checked before the transaction so a 403 never takes a
+      // lock. Nothing else is decided out here.
+      const owned = await conversions.findById(conversionId);
+      if (!owned) throw Errors.notFound('Conversion');
 
-      const campaign = await campaigns.findById(conv.campaignId);
+      const campaign = await campaigns.findById(owned.campaignId);
       if (!campaign || campaign.brandId !== brandId) throw Errors.forbidden();
 
-      if (conv.status !== 'APPROVED') {
-        throw Errors.badRequest(
-          conv.status === 'REJECTED'
-            ? 'This conversion has already been reversed or rejected'
-            : 'Only an approved conversion can be reversed. Reject it instead.'
-        );
-      }
-
-      const originalValue = Number(conv.conversionValue);
-      const originalCommission = Number(conv.commissionAmount);
-      const refundAmount = input.refundAmount ?? originalValue;
-
-      let outcome;
-      try {
-        outcome = calculateRefund(originalValue, originalCommission, refundAmount);
-      } catch (err) {
-        throw Errors.badRequest((err as Error).message);
-      }
-
-      const commission = await prisma.commission.findFirst({
-        where: { conversionId },
-      });
-      if (!commission) throw Errors.notFound('Commission');
-
-      // A commission already committed to an unsettled payout is the one case
-      // we refuse. Editing it would change an amount an admin is in the middle
-      // of transferring; the brand should wait for the payout to settle or
-      // fail, at which point the normal paths apply.
-      if (commission.status === 'INCLUDED_IN_PAYOUT') {
-        throw Errors.invalidRequest(
-          'COMMISSION_IN_PAYOUT',
-          'This commission is part of a payout that has not settled yet. ' +
-            'Try again once the payout has completed or failed.'
-        );
-      }
-
       return prisma.$transaction(async (tx) => {
+        // Serialises reversals of this one conversion.
+        //
+        // Every check used to happen before the transaction and every write
+        // by id inside it, so two concurrent refunds both read APPROVED, both
+        // read the commission as PAID, and both wrote a negative balance
+        // adjustment -- the same refund deducted twice from the affiliate's
+        // next payout. A retried request was enough.
+        //
+        // A conditional claim on status fixes the *full* refund case, because
+        // that moves APPROVED -> REJECTED. It does nothing for a partial
+        // refund, which leaves the conversion APPROVED and would happily
+        // reduce it twice. The lock covers both, and it is the same pattern
+        // requestPayout already uses.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`conversion-reverse:${conversionId}`}))`;
+
+        // Re-read under the lock. Everything from here is decided on state
+        // that cannot change underneath us.
+        const conv = await tx.conversion.findUnique({ where: { id: conversionId } });
+        if (!conv) throw Errors.notFound('Conversion');
+
+        if (conv.status !== 'APPROVED') {
+          throw Errors.badRequest(
+            conv.status === 'REJECTED'
+              ? 'This conversion has already been reversed or rejected'
+              : 'Only an approved conversion can be reversed. Reject it instead.'
+          );
+        }
+
+        const originalValue = Number(conv.conversionValue);
+        const originalCommission = Number(conv.commissionAmount);
+        const refundAmount = input.refundAmount ?? originalValue;
+
+        let outcome;
+        try {
+          outcome = calculateRefund(originalValue, originalCommission, refundAmount);
+        } catch (err) {
+          throw Errors.badRequest((err as Error).message);
+        }
+
+        const commission = await tx.commission.findFirst({ where: { conversionId } });
+        if (!commission) throw Errors.notFound('Commission');
+
+        // A commission already committed to an unsettled payout is the one
+        // case we refuse. Editing it would change an amount an admin is in
+        // the middle of transferring; the brand should wait for the payout to
+        // settle or fail, at which point the normal paths apply.
+        if (commission.status === 'INCLUDED_IN_PAYOUT') {
+          throw Errors.invalidRequest(
+            'COMMISSION_IN_PAYOUT',
+            'This commission is part of a payout that has not settled yet. ' +
+              'Try again once the payout has completed or failed.'
+          );
+        }
+
         await tx.conversion.update({
           where: { id: conversionId },
           data: outcome.isFullRefund

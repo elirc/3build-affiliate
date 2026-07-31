@@ -124,6 +124,83 @@ describe('fraud scoring and review', () => {
     expect(commission.status).toBe('CLAWED_BACK');
   });
 
+  it('still flags a one-IP cookie when the campaign has other traffic', async () => {
+    // The scoping bug. The click count was per-cookie but the distinct-IP
+    // count was taken across the whole affiliate/campaign, so the rule read
+    // "this cookie clicked a lot AND the campaign has only ever seen one IP".
+    // Two ordinary visitors were enough to switch the signal off for good --
+    // on exactly the busy campaigns worth policing.
+    const s = await scenario();
+    const suspect = 'suspect-cookie';
+
+    // Six clicks, one IP, one cookie: this is what the rule exists to catch.
+    for (let i = 0; i < 6; i++) {
+      await prisma.clickEvent.create({
+        data: {
+          trackingLinkId: s.link.id,
+          timestamp: new Date(Date.now() - 60 * 1000),
+          ipHash: 'same-ip',
+          userAgent: 'Mozilla/5.0 (test)',
+          attributionCookieId: suspect,
+        },
+      });
+    }
+
+    // Unrelated, perfectly normal traffic on the same campaign from other IPs.
+    for (const ip of ['ip-a', 'ip-b', 'ip-c']) {
+      await prisma.clickEvent.create({
+        data: {
+          trackingLinkId: s.link.id,
+          timestamp: new Date(Date.now() - 60 * 1000),
+          ipHash: ip,
+          userAgent: 'Mozilla/5.0 (test)',
+          attributionCookieId: `normal-${ip}`,
+        },
+      });
+    }
+
+    await report(
+      s.campaign.id,
+      {
+        externalOrderId: 'concentrated-1',
+        conversionValue: 100,
+        attributionCookieId: suspect,
+      },
+      s.key
+    );
+
+    const review = await prisma.fraudReview.findFirstOrThrow();
+    const rules = (review.signals as Array<{ rule: string }>).map((x) => x.rule);
+    expect(rules).toContain('cookie_ip_concentration');
+  });
+
+  it('does not flag concentration for a cookie using several IPs', async () => {
+    const s = await scenario();
+    const cookie = 'spread-cookie';
+
+    for (const ip of ['ip-1', 'ip-2', 'ip-3', 'ip-4', 'ip-5', 'ip-6']) {
+      await prisma.clickEvent.create({
+        data: {
+          trackingLinkId: s.link.id,
+          timestamp: new Date(Date.now() - 60 * 1000),
+          ipHash: ip,
+          userAgent: 'Mozilla/5.0 (test)',
+          attributionCookieId: cookie,
+        },
+      });
+    }
+
+    await report(
+      s.campaign.id,
+      { externalOrderId: 'spread-1', conversionValue: 100, attributionCookieId: cookie },
+      s.key
+    );
+
+    const review = await prisma.fraudReview.findFirst();
+    const rules = ((review?.signals ?? []) as Array<{ rule: string }>).map((x) => x.rule);
+    expect(rules).not.toContain('cookie_ip_concentration');
+  });
+
   it('records the reviewing admin', async () => {
     const s = await scenario();
     const cookie = 'audit-cookie';

@@ -9,6 +9,12 @@ const paginationSchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
+const adminPayoutsQuerySchema = z.object({
+  status: z
+    .enum(['PENDING', 'PROCESSING', 'PAID', 'FAILED', 'CANCELLED'])
+    .optional(),
+});
+
 const failSchema = z.object({
   reason: z.string().min(1).max(500),
 });
@@ -67,7 +73,7 @@ export async function payoutRoutes(app: FastifyInstance) {
     { preHandler: [requireAuth, requireRole('ADMIN')] },
     async (req) => {
       const { page, pageSize } = paginationSchema.parse(req.query);
-      const { status } = req.query as { status?: string };
+      const { status } = adminPayoutsQuerySchema.parse(req.query);
       return svc.listForAdmin({ status, page, pageSize });
     }
   );

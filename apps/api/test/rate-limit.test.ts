@@ -10,6 +10,7 @@ import {
   bucketKey,
   createRateLimiter,
   rateLimiter,
+  type RateLimitPolicy,
 } from '../src/lib/rate-limiter';
 import { login, makeAdmin, makeAffiliate } from './factories';
 
@@ -45,7 +46,27 @@ describe('rate limiting', () => {
   });
 
   describe('the bucket itself', () => {
-    const policy = RATE_LIMIT_TIERS.postback;
+    /**
+     * The postback tier's burst, at a rate low enough that refill cannot
+     * interfere.
+     *
+     * Written first against the real tier -- 100 a minute -- and it failed:
+     * spending 200 tokens one at a time against a real Redis takes several
+     * seconds on a contended machine, the bucket hands back a dozen tokens
+     * while the loop is running, and "exactly 200 succeed" becomes a statement
+     * about how fast the box is. A test that can only pass on fast hardware is
+     * worse than no test.
+     *
+     * What these need from Redis is *atomicity*, not arithmetic: the refill
+     * maths is pinned against a fake clock in `@affiliate/analytics`. So the
+     * rate is turned down to one a minute and the burst is the real one.
+     */
+    const policy: RateLimitPolicy = {
+      perMinute: 1,
+      burst: RATE_LIMIT_TIERS.postback.burst,
+      scope: 'apiKey',
+      failOpen: true,
+    };
 
     it('allows the whole burst and rejects the one after it', async () => {
       const key = bucketKey('test', 'apiKey', 'burst');
@@ -58,8 +79,14 @@ describe('rate limiting', () => {
       const rejected = await rateLimiter.consume(key, policy);
       expect(rejected.allowed).toBe(false);
       expect(rejected.remaining).toBe(0);
-      // 100 a minute is one every 600ms, rounded up to the next whole second.
-      expect(rejected.retryAfterSeconds).toBe(1);
+
+      // One token a minute, so a whole period is the ceiling. Not asserted
+      // exactly: spending 200 tokens takes a second or ten depending on the
+      // machine, and the fraction of a token earned back in that time comes
+      // straight off the wait. The exact arithmetic is pinned against a fake
+      // clock in `@affiliate/analytics`, where the clock does not wander.
+      expect(rejected.retryAfterSeconds).toBeGreaterThan(0);
+      expect(rejected.retryAfterSeconds).toBeLessThanOrEqual(60);
     });
 
     it('gives every key its own budget', async () => {
@@ -157,10 +184,18 @@ describe('rate limiting', () => {
     });
 
     it('rejects the request past the burst with a usable Retry-After', async () => {
-      for (let i = 0; i < publicTier.burst; i += 1) {
+      // Not "the 101st is a 429". The public tier refills a token a second and
+      // a hundred injects take longer than that, so the exact request number
+      // is a property of the machine. What is true regardless: the burst is
+      // honoured, and the budget is finite.
+      let allowed = 0;
+      for (let i = 0; i < publicTier.burst * 3; i += 1) {
         const res = await app.inject({ method: 'GET', url: ANY_AUTHENTICATED_ROUTE });
+        if (res.statusCode === 429) break;
         expect(res.statusCode).toBe(401);
+        allowed += 1;
       }
+      expect(allowed).toBeGreaterThanOrEqual(publicTier.burst);
 
       const rejected = await app.inject({
         method: 'GET',
@@ -189,9 +224,16 @@ describe('rate limiting', () => {
 
       const rejected = await attempt();
       expect(rejected.statusCode).toBe(429);
-      // Ten a minute is one every six seconds.
-      expect(rejected.headers['retry-after']).toBe('6');
       expect(rejected.headers['x-ratelimit-limit']).toBe(String(authTier.burst));
+
+      // Ten a minute is one every six seconds, so a full period is the
+      // ceiling. It is a range rather than exactly 6 because the fifteen
+      // attempts above take a second or so and earn a fraction of a token
+      // back; the exact arithmetic is pinned against a fake clock in
+      // `@affiliate/analytics`, which is where it can be exact.
+      const retryAfter = Number(rejected.headers['retry-after']);
+      expect(retryAfter).toBeGreaterThan(0);
+      expect(retryAfter).toBeLessThanOrEqual(6);
     });
 
     it('counts authenticated traffic per user, not per address', async () => {

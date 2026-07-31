@@ -94,6 +94,7 @@ This is the classic "fast path writes to a queue, slow path persists" pattern.
 | Password hashing | argon2id | `apps/api/src/lib/hash.ts` |
 | Validation | Zod, shared between client and server | `packages/shared/src/schemas/` |
 | Logging | pino (pretty in dev) | `apps/api/src/lib/logger.ts` |
+| Rate limiting | Token bucket in Redis Lua, shared by every instance | `apps/api/src/lib/rate-limiter.ts` |
 | Frontend | Next.js 16 App Router + React 18 | `apps/web/` |
 | Server state | TanStack Query v5 | `apps/web/src/app/providers.tsx` |
 | Charts | Recharts | `apps/web/src/components/AnalyticsChart.tsx` |
@@ -308,6 +309,9 @@ services/      The workflow. Owns transactions, orchestration, and authorization
 repositories/  Prisma queries only, one per aggregate. Takes `db: DB` so it can
                be handed a transaction client.
 lib/           Cross-cutting: auth guards, error types, hashing, logging.
+plugins/       Root-level hooks every route inherits: idempotency, rate limiting.
+               Registered on the parent instance, not via fastify-plugin, so the
+               child scopes that `register(..., { prefix })` creates inherit them.
 config/        Env parsing (Zod), Prisma client, Redis client.
 workers/       setInterval loops. Started from server.ts unless DISABLE_WORKERS.
 ```

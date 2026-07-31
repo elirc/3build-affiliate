@@ -9,7 +9,6 @@ import { conversionService } from '../services/conversion.service';
 import { subscriptionService } from '../services/subscription.service';
 import { requireAuth, requireRole, type AuthedRequest } from '../lib/auth';
 import { requirePostbackSignature, type RawBodyRequest } from '../lib/postback-auth';
-import { env } from '../config/env';
 import { z } from 'zod';
 
 const brandConversionsQuerySchema = z.object({
@@ -61,14 +60,11 @@ export async function conversionRoutes(app: FastifyInstance) {
       {
         preHandler: [requirePostbackSignature()],
         config: {
-          rateLimit: {
-            max: env.POSTBACK_RATE_LIMIT_PER_MINUTE,
-            timeWindow: '1 minute',
-            // Keyed per credential rather than per IP: one brand's spike must
-            // not throttle another's, and storefronts commonly share egress
-            // IPs behind a NAT or a serverless platform.
-            keyGenerator: (req) => String(req.headers['x-affiliate-key'] ?? req.ip),
-          },
+          // Keyed per credential rather than per IP: one brand's spike must
+          // not throttle another's, and storefronts commonly share egress IPs
+          // behind a NAT or a serverless platform. The tier says so once;
+          // see lib/rate-limiter.ts.
+          rateLimit: 'postback',
           // The endpoint that most needs this: a brand's storefront retries on
           // timeout, and it cannot tell a request that was applied from one
           // that was not. `(campaignId, externalOrderId)` is unique, so a
@@ -91,7 +87,13 @@ export async function conversionRoutes(app: FastifyInstance) {
     // so they need the same authentication.
     scope.post<{ Params: { campaignId: string } }>(
       '/conversions/:campaignId/recurring',
-      { preHandler: [requirePostbackSignature()] },
+      {
+        preHandler: [requirePostbackSignature()],
+        // Same traffic, same credential, same tier. Left to the default these
+        // would be counted per IP, and a storefront behind a shared NAT would
+        // be throttled by whoever else is behind it.
+        config: { rateLimit: 'postback' },
+      },
       async (req) => {
         const input = recurringBillingSchema.parse(req.body);
         return subscriptions.recordBillingPeriod(req.params.campaignId, input);
@@ -100,7 +102,10 @@ export async function conversionRoutes(app: FastifyInstance) {
 
     scope.post<{ Params: { campaignId: string } }>(
       '/conversions/:campaignId/recurring/cancel',
-      { preHandler: [requirePostbackSignature()] },
+      {
+        preHandler: [requirePostbackSignature()],
+        config: { rateLimit: 'postback' },
+      },
       async (req) => {
         const { externalReference } = recurringBillingSchema
           .pick({ externalReference: true })

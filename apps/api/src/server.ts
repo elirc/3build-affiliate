@@ -3,11 +3,11 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
 import cookie from '@fastify/cookie';
-import rateLimit from '@fastify/rate-limit';
 import { env } from './config/env';
 import { logger } from './lib/logger';
 import { registerErrorHandler } from './lib/error-handler';
 import { registerIdempotency } from './plugins/idempotency';
+import { registerRateLimit, type RateLimitOptions } from './plugins/rate-limit';
 import { authRoutes } from './routes/auth.routes';
 import { campaignRoutes } from './routes/campaign.routes';
 import { trackingRoutes } from './routes/tracking.routes';
@@ -27,13 +27,19 @@ import { startNotificationWorker } from './workers/notification.worker';
 
 export interface BuildOptions {
   /**
+   * `false` turns rate limiting off entirely.
+   *
    * Tests drive the app through `app.inject()`, which replays requests through
-   * the real router without binding a socket. The global rate limiter counts
-   * those the same as real traffic, so a suite of a few hundred requests
-   * starts getting 429s partway through and fails in a way that looks like a
-   * bug in whatever it happened to be testing.
+   * the real router without binding a socket. The limiter counts those the
+   * same as real traffic, so a suite of a few hundred requests starts getting
+   * 429s partway through and fails in a way that looks like a bug in whatever
+   * it happened to be testing.
+   *
+   * An object keeps the limiter on but swaps the Redis behind it, which is how
+   * the "Redis is down" behaviour gets tested without taking the container
+   * away from every other suite.
    */
-  rateLimit?: boolean;
+  rateLimit?: boolean | RateLimitOptions;
 }
 
 /**
@@ -53,19 +59,32 @@ export async function build(options: BuildOptions = {}) {
   });
   await app.register(cookie);
   await app.register(jwt, { secret: env.JWT_SECRET });
-  if (options.rateLimit !== false) {
-    await app.register(rateLimit, { max: 200, timeWindow: '1 minute' });
-  }
 
   registerErrorHandler(app);
   // Before the routes: hooks on the parent are inherited by the child scopes
   // that `app.register(..., { prefix })` creates below.
+  //
+  // Rate limiting first, so a request that is going to be rejected is rejected
+  // before anything else spends work on it. It reads the JWT, so it has to
+  // come after `@fastify/jwt` is registered.
+  if (options.rateLimit !== false) {
+    registerRateLimit(app, typeof options.rateLimit === 'object' ? options.rateLimit : {});
+  }
   registerIdempotency(app);
 
-  app.get('/health', async () => ({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-  }));
+  app.get(
+    '/health',
+    // Never rate limited. Probes come from a handful of load balancer
+    // addresses, so they share a bucket with each other and with anyone else
+    // behind the same hop; throttling one would fail a liveness check and take
+    // the instance out of rotation for a reason that has nothing to do with
+    // its health.
+    { config: { rateLimit: false } },
+    async () => ({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+    })
+  );
 
   await app.register(authRoutes, { prefix: '/api/auth' });
   await app.register(campaignRoutes, { prefix: '/api' });

@@ -36,4 +36,15 @@ export const Errors = {
     new AppError(429, 'RATE_LIMITED', msg),
   internal: (msg = 'Internal server error') =>
     new AppError(500, 'INTERNAL', msg),
+
+  /**
+   * We could not do the work, and it is our fault rather than the caller's.
+   *
+   * Distinct from `rateLimited` on purpose: a 429 tells a client it sent too
+   * much, which is a lie when the truth is that a dependency we need to count
+   * with is unreachable. The client's action is the same -- wait and retry --
+   * but the two are different alerts and only one of them is about the caller.
+   */
+  unavailable: (msg = 'Service temporarily unavailable') =>
+    new AppError(503, 'SERVICE_UNAVAILABLE', msg),
 };

@@ -8,6 +8,7 @@ Engineering documentation for the Affiliate & Referral Marketing Platform.
 | [02-user-stories.md](./02-user-stories.md) | The 20 stories that were built, with the acceptance criteria and trade-offs each was judged against. Now a record rather than a backlog — see the status note at the top. |
 | [03-postback-integration.md](./03-postback-integration.md) | For a brand's engineers: how to sign and send conversion reports. Written to be shared outside this repo. |
 | [04-backend-stories.md](./04-backend-stories.md) | Ten backend-depth stories (BE-01 … BE-10) chosen for what they teach: token rotation, idempotency, poison messages, keyset pagination, webhook delivery, query plans, leader election, observability, rate limiting, streamed imports. **This is the current backlog.** |
+| [05-query-performance.md](./05-query-performance.md) | The `EXPLAIN (ANALYZE, BUFFERS)` output behind every index in `schema.prisma`, before and after, at 500k click events. Read it before adding an index — and before deleting one. |
 
 ## Where the project stands
 

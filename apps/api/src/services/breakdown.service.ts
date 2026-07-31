@@ -108,6 +108,12 @@ export function breakdownService() {
           SELECT tl."campaignId" AS cid, COUNT(*) AS n
           FROM "ClickEvent" ce
           JOIN "TrackingLink" tl ON tl.id = ce."trackingLinkId"
+          -- The brand filter is repeated inside the subquery, not left to the
+          -- outer WHERE. A LEFT JOIN to a derived table cannot be correlated
+          -- with the outer query, so without this the subquery aggregates
+          -- every click on the platform and then discards every campaign but
+          -- this brand's.
+          JOIN "Campaign" cc ON cc.id = tl."campaignId" AND cc."brandId" = ${brandId}
           WHERE ce."isCounted" = true
           AND ce."timestamp" >= ${start} AND ce."timestamp" <= ${end}
           GROUP BY 1
@@ -118,6 +124,7 @@ export function breakdownService() {
                  SUM(co."conversionValue") AS revenue,
                  SUM(co."commissionAmount") AS commission
           FROM "Conversion" co
+          JOIN "Campaign" cv ON cv.id = co."campaignId" AND cv."brandId" = ${brandId}
           WHERE co."occurredAt" >= ${start} AND co."occurredAt" <= ${end}
             AND ${statusFilter(opts.includePending ?? false)}
           GROUP BY 1
@@ -263,6 +270,11 @@ export function breakdownService() {
         LEFT JOIN (
           SELECT ce."trackingLinkId" AS lid, COUNT(*) AS n
           FROM "ClickEvent" ce
+          -- Same reasoning as byCampaign: this used to count every click on
+          -- the platform and discard all but one affiliate's. One affiliate
+          -- asking for their own links should not read everybody's.
+          JOIN "TrackingLink" own ON own.id = ce."trackingLinkId"
+            AND own."affiliateId" = ${affiliateId}
           WHERE ce."isCounted" = true
           AND ce."timestamp" >= ${start} AND ce."timestamp" <= ${end}
           GROUP BY 1
@@ -273,7 +285,8 @@ export function breakdownService() {
                  SUM(co."conversionValue") AS revenue,
                  SUM(co."commissionAmount") AS commission
           FROM "Conversion" co
-          WHERE co."occurredAt" >= ${start} AND co."occurredAt" <= ${end}
+          WHERE co."affiliateId" = ${affiliateId}
+            AND co."occurredAt" >= ${start} AND co."occurredAt" <= ${end}
             AND ${statusFilter(opts.includePending ?? false)}
           GROUP BY 1
         ) convs ON convs.lid = tl.id

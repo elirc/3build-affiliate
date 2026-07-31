@@ -210,60 +210,93 @@ function asEnvelope(value: unknown): DeadLetterEnvelope | null {
   return null;
 }
 
+/**
+ * Turns a queued payload into the row it becomes.
+ *
+ * Split out from the write so the transaction contains no CPU work. Parsing a
+ * user agent is not free, and doing a hundred of them *inside* a transaction
+ * holds its connection and its locks for the whole parse -- a cost paid by
+ * every other writer, for work that touches no rows.
+ */
+function toRow(e: ClickEventPayload) {
+  // Recomputed when the producer did not say, so a payload from an older
+  // redirect deploy -- or from anything else writing to this queue -- is still
+  // classified rather than defaulting to "human".
+  const trafficKind = parseTrafficKind(e.trafficKind) ?? classifyTraffic(e.userAgent);
+  const isCounted = e.isCounted ?? countsAsClick(trafficKind);
+  const ua = new UAParser(e.userAgent);
+
+  return {
+    trackingLinkId: e.trackingLinkId,
+    timestamp: new Date(e.timestamp),
+    ipHash: e.ip,
+    userAgent: e.userAgent,
+    referrer: e.referrer || null,
+    deviceType: ua.getDevice().type ?? 'desktop',
+    browser: ua.getBrowser().name ?? null,
+    os: ua.getOS().name ?? null,
+    attributionCookieId: e.cookieId,
+    trafficKind,
+    isCounted,
+    // Capped again here, not only at the redirect edge.
+    //
+    // The edge is where the caps belong for latency reasons, but this worker
+    // consumes a Redis list -- it does not know who wrote to it, and "the
+    // producer already validated this" is exactly the assumption that stops
+    // being true when a second producer appears. Enforcing it where the data
+    // is stored is what actually bounds the column.
+    subIds: cappedSubIds(e.subIds),
+  };
+}
+
+/**
+ * Writes one slice of the queue, all or nothing.
+ *
+ * The all-or-nothing part is not decoration. `bisectCommit` retries *halves*
+ * of a slice that failed, so anything this function applied before throwing
+ * would be applied again -- duplicate clicks, double-counted counters, and no
+ * error anywhere. One transaction containing one `createMany` is what makes
+ * bisection safe.
+ *
+ * It used to be one `INSERT` per event inside that transaction: a hundred
+ * round trips to write a hundred rows, each a full request and response over
+ * the socket with the transaction sat open the whole time. `createMany` sends
+ * them as a single multi-row `INSERT`. Nothing about the rows changed; only
+ * how many times we asked Postgres for something.
+ */
 async function flushBatch(events: ClickEventPayload[]) {
+  const rows = events.map(toRow);
+
+  // Only counted clicks move the denormalised counter. The row is written
+  // either way, so filtered traffic stays visible in the table while staying
+  // out of the numbers.
   const linkCounts = new Map<string, number>();
+  for (const row of rows) {
+    if (!row.isCounted) continue;
+    linkCounts.set(row.trackingLinkId, (linkCounts.get(row.trackingLinkId) ?? 0) + 1);
+  }
+
+  // Sorted, so that two workers flushing overlapping batches take their row
+  // locks on TrackingLink in the same order. Unordered updates from concurrent
+  // transactions are the textbook deadlock, and it would show up as an
+  // occasional failed batch rather than as anything obviously lock-shaped.
+  const counters = [...linkCounts].sort(([a], [b]) => (a < b ? -1 : 1));
 
   await prisma.$transaction(async (tx) => {
-    for (const e of events) {
-      // Recomputed when the producer did not say, so a payload from an older
-      // redirect deploy -- or from anything else writing to this queue -- is
-      // still classified rather than defaulting to "human".
-      const trafficKind =
-        parseTrafficKind(e.trafficKind) ?? classifyTraffic(e.userAgent);
-      const isCounted = e.isCounted ?? countsAsClick(trafficKind);
+    await tx.clickEvent.createMany({ data: rows });
 
-      // Only counted clicks move the denormalised counter. The row is written
-      // either way, so the filtered traffic stays visible.
-      if (isCounted) {
-        linkCounts.set(e.trackingLinkId, (linkCounts.get(e.trackingLinkId) ?? 0) + 1);
-      }
-      const ua = new UAParser(e.userAgent);
-      const dev = ua.getDevice().type ?? 'desktop';
-      const browser = ua.getBrowser().name ?? null;
-      const os = ua.getOS().name ?? null;
-      await tx.clickEvent.create({
-        data: {
-          trackingLinkId: e.trackingLinkId,
-          timestamp: new Date(e.timestamp),
-          ipHash: e.ip,
-          userAgent: e.userAgent,
-          referrer: e.referrer || null,
-          deviceType: dev,
-          browser,
-          os,
-          attributionCookieId: e.cookieId,
-          trafficKind,
-          isCounted,
-          // Capped again here, not only at the redirect edge.
-          //
-          // The edge is where the caps belong for latency reasons, but this
-          // worker consumes a Redis list -- it does not know who wrote to it,
-          // and "the producer already validated this" is exactly the
-          // assumption that stops being true when a second producer appears.
-          // Enforcing it where the data is stored is what actually bounds the
-          // column.
-          subIds: cappedSubIds(e.subIds),
-        },
-      });
-    }
-    for (const [linkId, count] of linkCounts) {
+    // Still one statement per *distinct link*, not per event: 100 clicks
+    // across 4 links cost 5 statements rather than 104. Collapsing these into
+    // a single `UPDATE ... FROM (VALUES ...)` would save three more round
+    // trips and give up the lock ordering above, which is a bad trade at this
+    // size.
+    for (const [linkId, count] of counters) {
       await tx.trackingLink.update({
         where: { id: linkId },
         data: { clickCount: { increment: count } },
       });
     }
   });
-
 }
 
 /**

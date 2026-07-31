@@ -56,7 +56,8 @@ model User {
   refreshTokens      RefreshToken[]
   webhookEndpoints   WebhookEndpoint[]
 
-  @@index([email])
+  // Same reasoning as TrackingLink.shortCode: `email @unique` already has an
+  // index, and login was using it. The duplicate was never chosen.
   @@index([role])
 }
 
@@ -179,7 +180,7 @@ model Campaign {
 
   @@index([brandId])
   @@index([status])
-  @@index([slug])
+  // `slug @unique` already indexes this column; the duplicate was dead weight.
 }
 
 enum CampaignStatus {
@@ -250,7 +251,10 @@ model TrackingLink {
 
   @@index([affiliateId])
   @@index([campaignId])
-  @@index([shortCode])
+  // No index on shortCode: `@unique` above already creates one, and a second
+  // index on the same column is pure write cost. Postgres picked
+  // `TrackingLink_shortCode_key` for every lookup and never once picked
+  // `TrackingLink_shortCode_idx`.
 }
 
 // ============ CLICK EVENTS ============
@@ -282,12 +286,29 @@ model ClickEvent {
 
   conversions Conversion[]
 
-  @@index([trackingLinkId])
+  /// The index every analytics aggregate uses, in the order it uses it.
+  ///
+  /// Equality columns first, then the range: each aggregate scopes to a set of
+  /// links, wants only counted traffic, and asks for a window. Because those
+  /// three are also the *only* columns those aggregates read from this table,
+  /// Postgres answers them from the index alone -- `Index Only Scan`,
+  /// `Heap Fetches: 0`. The brand daily series went from 92,870 buffers to 499
+  /// on that one change.
+  ///
+  /// It replaces the plain `@@index([trackingLinkId])`: a composite serves
+  /// every prefix of itself, so keeping both would have paid twice for the
+  /// same index. It also replaced `@@index([isCounted, timestamp])`, which no
+  /// plan ever chose -- "counted" excludes 6% of rows, and Postgres will read
+  /// the whole table before it walks an index for 94% of it.
+  @@index([trackingLinkId, isCounted, timestamp])
+  /// The postback hot path: find the click a sale should be attributed to.
+  /// One cookie is one visitor, so this is as selective as an index gets.
   @@index([attributionCookieId])
+  /// Kept although no query uses it alone today. It is the only way to ask
+  /// "clicks in this window" without naming a link -- what a retention job
+  /// will want -- and it is what the planner probes to find the real ends of
+  /// the timestamp range. See fabledocs/05-query-performance.md.
   @@index([timestamp])
-  @@index([ipHash])
-  /// Analytics reads only counted clicks, so the filter belongs in the index.
-  @@index([isCounted, timestamp])
 }
 
 // ============ CONVERSIONS ============
@@ -332,7 +353,12 @@ model Conversion {
   fraudReviews     FraudReview[]
 
   @@unique([campaignId, externalOrderId])
-  @@index([affiliateId, status])
+  /// `occurredAt` appended to what was `[affiliateId, status]`. Every
+  /// affiliate-facing report asks for approved conversions *in a window*, and
+  /// without the third column Postgres read all 6,166 of an affiliate's
+  /// approved conversions to answer a question about 2,039 of them. The old
+  /// two-column index is a prefix of this one, so nothing lost it.
+  @@index([affiliateId, status, occurredAt])
   @@index([campaignId, status])
   @@index([trackingLinkId])
   @@index([occurredAt])

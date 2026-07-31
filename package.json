@@ -19,7 +19,8 @@
     "db:deploy": "prisma migrate deploy --schema apps/api/prisma/schema.prisma",
     "db:generate": "prisma generate --schema apps/api/prisma/schema.prisma",
     "db:studio": "prisma studio --schema apps/api/prisma/schema.prisma",
-    "db:seed": "npm run db:seed --workspace=apps/api"
+    "db:seed": "npm run db:seed --workspace=apps/api",
+    "seed:bulk": "npm run seed:bulk --workspace=apps/api"
   },
   "devDependencies": {
     "turbo": "^2.0.0",

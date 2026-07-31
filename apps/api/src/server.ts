@@ -8,6 +8,7 @@ import { logger } from './lib/logger';
 import { registerErrorHandler } from './lib/error-handler';
 import { registerIdempotency } from './plugins/idempotency';
 import { registerRateLimit, type RateLimitOptions } from './plugins/rate-limit';
+import { registerDbTiming } from './plugins/db-timing';
 import { authRoutes } from './routes/auth.routes';
 import { campaignRoutes } from './routes/campaign.routes';
 import { trackingRoutes } from './routes/tracking.routes';
@@ -73,6 +74,10 @@ export async function build(options: BuildOptions = {}) {
     registerRateLimit(app, typeof options.rateLimit === 'object' ? options.rateLimit : {});
   }
   registerIdempotency(app);
+  // Its hook is `onRequest`, which Fastify runs before every `preHandler`, so
+  // the timing context covers the idempotency plugin's own reads too -- they
+  // are part of what a request costs.
+  registerDbTiming(app);
 
   app.get(
     '/health',

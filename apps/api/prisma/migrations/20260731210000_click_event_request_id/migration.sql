@@ -1,0 +1,13 @@
+-- The correlation id of the redirect request that produced the click.
+--
+-- Nullable with no default and no backfill: every row that already exists
+-- predates correlation ids, and inventing one for them would be a lie that
+-- looks exactly like the truth. NULL means "we did not know", which is the
+-- honest answer.
+--
+-- No index, deliberately. ClickEvent is the largest table in the system and
+-- this is its hottest write path; an index on a high-cardinality column would
+-- be paid on every insert to serve a lookup that happens a handful of times a
+-- month, and that lookup is always bounded by a time window anyway, which the
+-- existing timestamp index already covers.
+ALTER TABLE "ClickEvent" ADD COLUMN "requestId" TEXT;

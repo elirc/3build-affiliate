@@ -56,10 +56,38 @@ describe('createLinkResolver', () => {
     const resolve = createLinkResolver({ redis, fetchLink });
 
     expect(await resolve('abc1234')).toEqual(LINK);
-    expect(fetchLink).toHaveBeenCalledWith('abc1234');
+    // The second argument is the correlation id, forwarded so that a slow
+    // cache miss is one traceable story across the redirect and the API rather
+    // than two log lines that happen to be close together. It is `undefined`
+    // here because this test does not supply one.
+    expect(fetchLink).toHaveBeenCalledWith('abc1234', undefined);
     expect(redis.sets).toEqual([
       [cacheKey('abc1234'), JSON.stringify(LINK), 'EX', POSITIVE_TTL_SECONDS],
     ]);
+  });
+
+  it('forwards the correlation id to the API on a miss', async () => {
+    const redis = fakeRedis();
+    const fetchLink = vi.fn().mockResolvedValue(LINK);
+
+    const resolve = createLinkResolver({ redis, fetchLink });
+
+    await resolve('abc1234', 'req-42');
+    expect(fetchLink).toHaveBeenCalledWith('abc1234', 'req-42');
+  });
+
+  it('gives the degraded-path callback the correlation id', async () => {
+    // "Link resolution degraded" is the line an on-call engineer reads first,
+    // and it is useless if it cannot be tied to the click that produced it.
+    const redis = fakeRedis();
+    const boom = new Error('API unreachable');
+    const fetchLink = vi.fn().mockRejectedValue(boom);
+    const onError = vi.fn();
+
+    const resolve = createLinkResolver({ redis, fetchLink, onError });
+
+    expect(await resolve('abc1234', 'req-43')).toBeNull();
+    expect(onError).toHaveBeenCalledWith(boom, 'abc1234', 'req-43');
   });
 
   it('negatively caches an unknown code', async () => {

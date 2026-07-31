@@ -54,4 +54,11 @@ export interface ClickEventPayload {
   userAgent: string;
   referrer: string;
   subIds: Record<string, string>;
+  /**
+   * The correlation id of the redirect request that produced the click.
+   *
+   * Optional because a message written by an older redirect deploy will not
+   * have one, and because the worker drops it when it cannot be trusted.
+   */
+  requestId?: string;
 }

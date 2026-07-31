@@ -9,7 +9,12 @@ import { prisma } from '../config/prisma';
 import { redis } from '../config/redis';
 import { logger } from '../lib/logger';
 import { beat } from '../lib/heartbeat';
-import { clickEventPayloadSchema, type ClickEventPayload } from '@affiliate/shared';
+import { runWithContext } from '../lib/request-context';
+import {
+  clickEventPayloadSchema,
+  sanitiseRequestId,
+  type ClickEventPayload,
+} from '@affiliate/shared';
 import { bisectCommit } from '@affiliate/analytics';
 
 export const QUEUE_KEY = 'click_events';
@@ -58,6 +63,36 @@ function cappedSubIds(raw: Record<string, string> | undefined) {
   return Object.keys(subIds).length > 0 ? subIds : undefined;
 }
 
+/**
+ * The correlation id the redirect service attached, if it can be trusted.
+ *
+ * Re-validated here even though the redirect already validated it, for exactly
+ * the reason the sub-ID cap is applied twice: this worker consumes a Redis list
+ * and does not know who wrote to it. "The producer already checked" stops being
+ * true the moment a second producer appears, and this value goes straight into
+ * a log line, which is where an unvalidated string does its damage.
+ *
+ * A bad id costs the id and nothing else. Refusing the event over it would mean
+ * losing a real click -- money somebody is owed -- to protect a debugging aid.
+ */
+function restoreRequestId(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  return sanitiseRequestId((payload as { requestId?: unknown }).requestId) ?? undefined;
+}
+
+/**
+ * Runs `fn` under the click's original request id, so everything it logs joins
+ * up with the redirect that produced it.
+ *
+ * Per event rather than per batch: a drain covers up to a hundred unrelated
+ * requests and there is no honest single id for it. When an event has no id the
+ * work runs with no context at all rather than under a freshly generated one --
+ * an id invented here would look like a correlation and correlate with nothing.
+ */
+function withRequestContext<T>(requestId: string | undefined, fn: () => T): T {
+  return requestId === undefined ? fn() : runWithContext({ requestId }, fn);
+}
+
 export async function drainClickEvents(): Promise<{
   flushed: number;
   deadLettered: number;
@@ -101,10 +136,16 @@ export async function drainClickEvents(): Promise<{
     // how you end up unable to explain a gap in the numbers.
     const result = clickEventPayloadSchema.safeParse(payload);
     if (!result.success) {
-      await deadLetter(
-        JSON.stringify(payload),
-        `schema: ${result.error.issues[0]?.message ?? 'invalid'}`,
-        envelope ?? undefined
+      // Rebound to the originating request, so the "click event parked" line
+      // here and the redirect line that produced it share an id. Without this
+      // the worker's log says a click was dropped but not which one, and the
+      // trail ends at the queue.
+      await withRequestContext(restoreRequestId(payload), () =>
+        deadLetter(
+          JSON.stringify(payload),
+          `schema: ${result.error.issues[0]?.message ?? 'invalid'}`,
+          envelope ?? undefined
+        )
       );
       deadLettered += 1;
       continue;
@@ -128,10 +169,12 @@ export async function drainClickEvents(): Promise<{
   for (const failure of outcome.failed) {
     const index = events.indexOf(failure.item);
     const raw = index >= 0 ? raws[index]! : JSON.stringify(failure.item);
-    await deadLetter(
-      raw,
-      String(failure.error).slice(0, 500),
-      index >= 0 ? (priors[index] ?? undefined) : undefined
+    await withRequestContext(restoreRequestId(failure.item), () =>
+      deadLetter(
+        raw,
+        String(failure.error).slice(0, 500),
+        index >= 0 ? (priors[index] ?? undefined) : undefined
+      )
     );
     deadLettered += 1;
   }
@@ -246,6 +289,11 @@ function toRow(e: ClickEventPayload) {
     // being true when a second producer appears. Enforcing it where the data
     // is stored is what actually bounds the column.
     subIds: cappedSubIds(e.subIds),
+
+    // The end of the trail. From here a single id joins the redirect log line,
+    // the worker log line and this row, which is what makes "was this click
+    // ever recorded?" a query rather than an argument.
+    requestId: restoreRequestId(e) ?? null,
   };
 }
 

@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import type { FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
 import { Redis } from 'ioredis';
 import crypto from 'node:crypto';
@@ -9,6 +10,7 @@ import {
   DEFAULT_DEDUP_WINDOW_SECONDS,
   normaliseSubIds,
 } from '@affiliate/analytics';
+import { REQUEST_ID_HEADER, sanitiseRequestId } from '@affiliate/shared';
 import { createApiFetchLink, createLinkResolver } from './link-resolver';
 
 const PORT = Number(process.env.REDIRECT_PORT ?? 3002);
@@ -39,6 +41,29 @@ async function buildApp() {
 
   await app.register(cookie);
 
+  /**
+   * The correlation id for the request currently being served.
+   *
+   * A WeakMap rather than a decorated request, so nothing has to be declared
+   * onto Fastify's own types for a value only this file reads. No
+   * `AsyncLocalStorage` here either: this service has exactly one handler and
+   * the id is needed in three places inside it, so passing it is clearer than
+   * hiding it. The API is the one with a call stack deep enough to justify a
+   * store.
+   */
+  const requestIds = new WeakMap<FastifyRequest, string>();
+
+  app.addHook('onRequest', (request, reply, done) => {
+    // A shopper's browser will not send one; a load balancer or an affiliate's
+    // own tooling might. Either way it is attacker-controlled, so it is
+    // validated before it is echoed, logged or forwarded.
+    const requestId =
+      sanitiseRequestId(request.headers[REQUEST_ID_HEADER]) ?? crypto.randomUUID();
+    requestIds.set(request, requestId);
+    reply.header(REQUEST_ID_HEADER, requestId);
+    done();
+  });
+
   const resolveLink = createLinkResolver({
     redis,
     fetchLink: createApiFetchLink({
@@ -46,8 +71,8 @@ async function buildApp() {
       token: INTERNAL_API_TOKEN,
       timeoutMs: LOOKUP_TIMEOUT_MS,
     }),
-    onError: (err, shortCode) =>
-      app.log.warn({ err, shortCode }, 'Link resolution degraded'),
+    onError: (err, shortCode, requestId) =>
+      app.log.warn({ err, shortCode, requestId }, 'Link resolution degraded'),
   });
 
   app.get('/health', async () => ({ status: 'ok' }));
@@ -56,8 +81,9 @@ async function buildApp() {
     '/r/:shortCode',
     async (request, reply) => {
       const { shortCode } = request.params;
+      const requestId = requestIds.get(request);
 
-      const link = await resolveLink(shortCode);
+      const link = await resolveLink(shortCode, requestId);
       if (!link) return reply.redirect(FALLBACK_URL, 302);
       if (!link.isActive) return reply.redirect(FALLBACK_URL, 302);
 
@@ -130,6 +156,15 @@ async function buildApp() {
             subIds,
             trafficKind,
             isCounted: countsAsClick(trafficKind) && !isDuplicate,
+            // The half of correlation that actually costs something to build.
+            //
+            // The click leaves this process on a Redis list and is written to
+            // Postgres a second later by a different deployable, so the
+            // in-process context is long gone by then. Carrying the id in the
+            // payload is the only thing that joins the redirect log line, the
+            // worker log line and the row -- and it is the join you want when
+            // an affiliate says a click was never counted.
+            requestId,
           })
         )
         .catch(() => {});

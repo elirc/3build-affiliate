@@ -3,6 +3,19 @@
 Review date: 2026-07-25  
 Scope: `apps/api`, `apps/redirect`, `apps/web`, `packages/shared`, `packages/analytics`, Prisma schema/migrations, tests, and CI configuration.
 
+> **Status as of 2026-10-06** — this review predates the BE-01 … BE-10 work
+> and is kept as a frozen record. Where each finding stands now, verified
+> against `main`:
+>
+> | Finding | Status | Evidence |
+> | --- | --- | --- |
+> | CR-01 refresh tokens | **Partially fixed** | BE-01 added rotation, hashed token-family records and reuse detection (`auth.service.ts`). The token still lives in `localStorage` — see "Known limitations" in the root README. |
+> | CR-02 vulnerable dependencies | **Open** | Deliberately left for its own maintenance pass; listed under "Still open" in `fabledocs/README.md`. |
+> | CR-03 fraud IP scoping | **Fixed** | `fraud.service.ts` now scopes the distinct-IP count to the cookie being evaluated (one grouped query; the comment at the top of the rule cites this finding). |
+> | CR-04 concurrent reversal double-charge | **Fixed** | `conversion.service.ts` now claims the conversion inside the transaction with a conditional `updateMany` and checks the affected-row count. |
+> | CR-05 poison click events | **Fixed** | BE-03: per-message schema validation, batch bisection to isolate the failing event, per-record DLQ reasons. |
+> | CR-06 validation gaps | **Fixed** | Routes named here now parse bodies and pagination through Zod schemas (e.g. `toggleLinkSchema` in `tracking.routes.ts`). |
+
 ## Executive summary
 
 The project has a solid foundation: tenant and role checks are consistently applied to protected API routes, input schemas cover most write operations, postbacks use raw-body HMAC verification, payout creation uses a database advisory lock, uploaded images are inspected by content, and the codebase has meaningful unit and integration coverage.

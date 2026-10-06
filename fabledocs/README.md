@@ -7,7 +7,7 @@ Engineering documentation for the Affiliate & Referral Marketing Platform.
 | [01-app-overview.md](./01-app-overview.md) | How the app works: architecture, data model, the two critical request flows, and conventions. Section 8 records what was wrong when the codebase was inherited and where each thing was fixed. **Read this first.** |
 | [02-user-stories.md](./02-user-stories.md) | The 20 stories that were built, with the acceptance criteria and trade-offs each was judged against. Now a record rather than a backlog — see the status note at the top. |
 | [03-postback-integration.md](./03-postback-integration.md) | For a brand's engineers: how to sign and send conversion reports. Written to be shared outside this repo. |
-| [04-backend-stories.md](./04-backend-stories.md) | Ten backend-depth stories (BE-01 … BE-10) chosen for what they teach: token rotation, idempotency, poison messages, keyset pagination, webhook delivery, query plans, leader election, observability, rate limiting, streamed imports. **This is the current backlog.** |
+| [04-backend-stories.md](./04-backend-stories.md) | Ten backend-depth stories (BE-01 … BE-10) chosen for what they teach: token rotation, idempotency, poison messages, keyset pagination, webhook delivery, query plans, leader election, observability, rate limiting, streamed imports. All ten are now on `main`; kept as the record of what each was judged against. |
 | [05-query-performance.md](./05-query-performance.md) | The `EXPLAIN (ANALYZE, BUFFERS)` output behind every index in `schema.prisma`, before and after, at 500k click events. Read it before adding an index — and before deleting one. |
 
 ## Where the project stands
@@ -66,6 +66,38 @@ set `BULK_SEED=1` to run it. `npm run test` for the fast ones,
 An engineer joining this codebase who needs to (a) understand what exists
 before changing it, and (b) ship the next thing without guessing at
 conventions.
+
+## Using this repo to level up
+
+Everything was built through reviewed pull requests with the reasoning left
+in, which makes this one of the few codebases where you can check your own
+judgement against a written answer key. In increasing order of difficulty:
+
+1. **Trace a click to a commission.** Follow §6 of
+   [01-app-overview.md](./01-app-overview.md), then run the four-step curl
+   flow in §9 against the seeded data. **Check**: a `Conversion` row exists,
+   its `Commission` is `PENDING`, and you can say which process wrote each
+   (redirect service, click worker, API).
+2. **Read one pure function and its test as a pair.**
+   `packages/analytics/src/attribution.ts` and `attribution.test.ts`. Break
+   the function deliberately (flip the last-click comparison), run
+   `npm run test`, read the failure, revert. **Check**: you can explain why
+   this logic lives in `packages/analytics` and not in a service — rule 2
+   below.
+3. **Re-derive a backend story before reading its answer.** Pick one BE
+   story from [04-backend-stories.md](./04-backend-stories.md), read only
+   its acceptance criteria, and write your own one-page design: tables
+   touched, failure modes, what you'd test. Then find the PR that delivered
+   it and diff your plan against the PR's "Trade-offs" section. **Check**:
+   for BE-01, your design handles two browser tabs refreshing concurrently —
+   the shipped version initially didn't, and the story's status note says
+   how that was caught.
+4. **Write the next story yourself.** Take an open gap from the list above
+   (the fraud-evaluate outbox move is the most self-contained: the pattern
+   to copy is already in `notification.service.ts`). Write it in the format
+   of [02-user-stories.md](./02-user-stories.md) — acceptance criteria,
+   files, tests — before writing code. **Check**: someone else could build
+   it from your story without asking you anything.
 
 ## Ground rules for anyone working in this repo
 
